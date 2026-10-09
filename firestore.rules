@@ -96,6 +96,22 @@ service cloud.firestore {
           && matchesReport(d, report);
       }
 
+      // Fotos de la cerveza y de la tapa, comprimidas como JPEG en base64.
+      match /photos/{photoId} {
+        allow read: if true;
+        allow create: if signedIn()
+          && existsAfter(/databases/$(database)/documents/bars/$(barId))
+          && request.resource.data.keys().hasOnly(['kind', 'data', 'userId', 'username', 'createdAt'])
+          && request.resource.data.kind in ['beer', 'tapa']
+          && request.resource.data.data is string
+          && request.resource.data.data.size() <= 700000
+          && request.resource.data.data.matches('data:image/jpeg;base64,[A-Za-z0-9+/=]+')
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.username == usernameOf(request.auth.uid)
+          && request.resource.data.createdAt == request.time;
+        allow update, delete: if false;
+      }
+
       match /reports/{reportId} {
         allow read: if true;
         allow create: if signedIn() && validNewReport();

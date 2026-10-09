@@ -160,6 +160,56 @@ body { display: flex; flex-direction: column; }
 .section { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
 .section h3 { margin: 0 0 8px; font-size: 1rem; }
 
+/* Fotos */
+.photos { border: 1px solid var(--border); border-radius: 6px; }
+.photo-pickers { display: flex; gap: 12px; flex-wrap: wrap; }
+.photo-picker { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.photo-label { font-size: 0.8rem; }
+.photo-slot {
+  display: grid;
+  place-items: center;
+  width: 112px;
+  height: 112px;
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  background: #fafafa;
+}
+.form .photo-slot { display: grid; gap: 0; } /* gana a «.form label» */
+.photo-slot img { width: 100%; height: 100%; object-fit: cover; }
+.photo-placeholder { font-size: 0.9rem; font-weight: 600; color: var(--gray); text-align: center; padding: 4px; }
+.photo-remove {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  background: var(--text);
+  color: #fff;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.photo-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.photo-gallery figure { margin: 0; min-width: 0; }
+.photo-gallery figcaption { font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.photo-thumb { display: block; width: 100%; aspect-ratio: 1; padding: 0; border: none; border-radius: 8px; overflow: hidden; cursor: zoom-in; }
+.photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.photo-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(0 0 0 / 0.85);
+  cursor: zoom-out;
+}
+.photo-viewer img { max-width: 100%; max-height: 100%; border-radius: 8px; }
+
 /* Mi cuenta */
 .account-name { font-size: 1.15rem; font-weight: 700; margin: 0; }
 .account-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

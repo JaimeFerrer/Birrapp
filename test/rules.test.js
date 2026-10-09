@@ -126,3 +126,31 @@ test('precios: se añaden a tu nombre y actualizan el resumen correctamente', as
   }));
   await assertFails(updateDoc(luisBar, { price: 0.5 }));
 });
+
+test('fotos: solo JPEG, de tamaño razonable, a tu nombre y en bares que existen', async () => {
+  const ana = as('ana');
+  await registerProfile(ana, 'ana', 'ana');
+  const { barRef, commit } = newBar(ana, 'ana', 'ana');
+  await commit();
+  const photo = (overrides = {}) => ({
+    kind: 'beer', data: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==', userId: 'ana', username: 'ana',
+    createdAt: serverTimestamp(), ...overrides,
+  });
+  const photos = collection(ana, 'bars', barRef.id, 'photos');
+
+  await assertSucceeds(setDoc(doc(photos), photo()));
+  await assertSucceeds(setDoc(doc(photos), photo({ kind: 'tapa' })));
+  await assertFails(setDoc(doc(collection(anon(), 'bars', barRef.id, 'photos')), photo()));
+  await assertFails(setDoc(doc(photos), photo({ kind: 'selfie' })));
+  await assertFails(setDoc(doc(photos), photo({ data: 'data:text/html;base64,PHNjcmlwdD4=' })));
+  await assertFails(setDoc(doc(photos), photo({ data: `data:image/jpeg;base64,${'A'.repeat(700000)}` })));
+  await assertFails(setDoc(doc(photos), photo({ userId: 'luis' })));
+  await assertFails(setDoc(doc(collection(ana, 'bars', 'no-existe', 'photos')), photo()));
+  // Se pueden ver sin sesión, pero no borrar ni cambiar.
+  const first = doc(photos, 'una');
+  await setDoc(first, photo());
+  await assertSucceeds(getDoc(doc(anon(), 'bars', barRef.id, 'photos', 'una')));
+  await assertFails(updateDoc(first, { kind: 'tapa' }));
+  await assertFails(deleteDoc(first));
+});
+

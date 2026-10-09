@@ -6,7 +6,7 @@ import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 import './styles.css';
 import {
   configured, watchUser, register, login, logout, sendPasswordReset, changeEmail,
-  watchBars, getBar, getMyBars, addBar, addReport,
+  watchBars, getBar, getMyBars, addBar, addReport, compressPhoto, getPhotos,
 } from './firebase.js';
 
 // Con Vite las imágenes del marcador por defecto de Leaflet hay que indicarlas a mano.
@@ -350,6 +350,77 @@ $('#locate-btn').addEventListener('click', () => {
   );
 });
 
+const PHOTO_KINDS = { beer: 'Cerveza', tapa: 'Tapa' };
+
+// Botones para elegir (o hacer) la foto de la cerveza y de la tapa. Cada foto se
+// comprime en cuanto se elige; `getPhotos()` espera a que estén listas.
+function photoPickers(form) {
+  const node = fragment(`
+    <fieldset class="photos">
+      <legend>Fotos (opcional)</legend>
+      <div class="photo-pickers">
+        ${Object.entries(PHOTO_KINDS).map(([kind, label]) => `
+          <div class="photo-picker" data-kind="${kind}" ${kind === 'tapa' ? 'hidden' : ''}>
+            <label class="photo-slot">
+              <input type="file" accept="image/*" hidden>
+              <span class="photo-placeholder">+ ${label}</span>
+            </label>
+            <button type="button" class="photo-remove" aria-label="Quitar foto de ${label.toLowerCase()}" hidden>×</button>
+            <span class="photo-label muted">${label}</span>
+          </div>`).join('')}
+      </div>
+    </fieldset>
+  `);
+  const pending = new Map();
+
+  function clear(picker) {
+    pending.delete(picker.dataset.kind);
+    $('.photo-slot img', picker)?.remove();
+    $('.photo-placeholder', picker).hidden = false;
+    $('.photo-placeholder', picker).textContent = `+ ${PHOTO_KINDS[picker.dataset.kind]}`;
+    $('.photo-remove', picker).hidden = true;
+    $('input', picker).value = '';
+  }
+
+  node.querySelectorAll('.photo-picker').forEach((picker) => {
+    const input = $('input', picker);
+    input.addEventListener('change', () => {
+      const file = input.files[0];
+      if (!file) return;
+      clear(picker);
+      $('.photo-placeholder', picker).textContent = 'Preparando…';
+      const job = compressPhoto(file);
+      pending.set(picker.dataset.kind, job);
+      job.then((data) => {
+        if (pending.get(picker.dataset.kind) !== job) return;
+        $('.photo-placeholder', picker).hidden = true;
+        $('.photo-slot', picker).append(Object.assign(document.createElement('img'), { src: data, alt: '' }));
+        $('.photo-remove', picker).hidden = false;
+      }).catch((err) => {
+        clear(picker);
+        $('.error', form).textContent = err.message;
+      });
+    });
+    $('.photo-remove', picker).addEventListener('click', () => clear(picker));
+  });
+
+  // La foto de la tapa solo tiene sentido si ponen tapa.
+  const tapaPicker = $('[data-kind="tapa"]', node);
+  form.querySelectorAll('input[name="has_tapa"]').forEach((radio) => radio.addEventListener('change', () => {
+    tapaPicker.hidden = radio.value !== 'yes';
+    if (tapaPicker.hidden) clear(tapaPicker);
+  }));
+
+  return {
+    node,
+    async getPhotos() {
+      const entries = [...pending.entries()];
+      const data = await Promise.all(entries.map(([, job]) => job));
+      return entries.map(([kind], i) => ({ kind, data: data[i] }));
+    },
+  };
+}
+
 function showAddBarForm() {
   const node = fragment(`
     <h2>Nuevo bar</h2>
@@ -358,19 +429,27 @@ function showAddBarForm() {
       <label>Nombre del bar <input name="name" required maxlength="100"></label>
       <label>Dirección (opcional) <input name="address" maxlength="200"></label>
       <div data-report></div>
+      <div data-photos></div>
       <p class="error"></p>
       <button class="btn primary">Guardar bar</button>
     </form>
   `);
-  $('[data-report]', node).replaceWith(reportFields());
   const form = $('form', node);
+  $('[data-report]', node).replaceWith(reportFields());
+  const pickers = photoPickers(form);
+  $('[data-photos]', node).replaceWith(pickers.node);
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     submitting(form, async () => {
       const { lat, lng } = state.draftMarker.getLatLng();
       const data = new FormData(form);
       const id = await addBar(state.user, {
-        name: data.get('name'), address: data.get('address'), lat, lng, ...readReport(form),
+        name: data.get('name'),
+        address: data.get('address'),
+        lat,
+        lng,
+        ...readReport(form),
+        photos: await pickers.getPhotos(),
       });
       stopPlacing();
       showBar(id);
@@ -378,6 +457,30 @@ function showAddBarForm() {
   });
   openPanel(node);
   $('input[name="name"]', panelBody).focus();
+}
+
+// Foto a pantalla completa; se cierra tocando en cualquier sitio.
+function showPhoto(src) {
+  const viewer = fragment(`<div class="photo-viewer" role="dialog" aria-label="Foto"><img src="${src}" alt=""></div>`).firstElementChild;
+  viewer.addEventListener('click', () => viewer.remove());
+  document.body.append(viewer);
+}
+
+async function loadBarPhotos(barId, box) {
+  let photos;
+  try {
+    photos = await getPhotos(barId);
+  } catch {
+    return;
+  }
+  if (!photos.length) return;
+  box.hidden = false;
+  box.append(fragment(`<h3>Fotos</h3><div class="photo-gallery">${photos.map((p) => `
+    <figure>
+      <button type="button" class="photo-thumb"><img src="${p.data}" alt="Foto de ${PHOTO_KINDS[p.kind]?.toLowerCase()}" loading="lazy"></button>
+      <figcaption class="muted">${PHOTO_KINDS[p.kind] ?? ''} · ${escapeHtml(p.username)}</figcaption>
+    </figure>`).join('')}</div>`));
+  box.querySelectorAll('.photo-thumb img').forEach((img) => img.parentElement.addEventListener('click', () => showPhoto(img.src)));
 }
 
 // ---------- Detalle de bar ----------
@@ -414,6 +517,7 @@ async function showBar(id) {
       media ${euros(bar.priceSum / bar.reportCount)} (${bar.reportCount} ${bar.reportCount === 1 ? 'opinión' : 'opiniones'})
     </p>
     ${tapa}
+    <div class="section" data-photos hidden></div>
     <div class="section" data-update></div>
     <div class="section">
       <h3>Historial</h3>
@@ -421,6 +525,8 @@ async function showBar(id) {
       <p class="muted">Añadido por ${escapeHtml(bar.createdByName)}</p>
     </div>
   `);
+
+  loadBarPhotos(id, $('[data-photos]', node));
 
   const update = $('[data-update]', node);
   if (state.user) {

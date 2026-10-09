@@ -91,6 +91,9 @@ npm test     # reglas de seguridad de Firestore contra el emulador (necesita Jav
   `tapaType`, `reportCount`, `priceSum`, `lastReportId`…), para pintar el mapa
   con una sola lectura.
 - `bars/{id}/reports/{id}`: cada precio que deja un usuario.
+- `bars/{id}/photos/{id}`: fotos de la cerveza o la tapa (`kind`), comprimidas
+  en el móvil a JPEG de unos cientos de KB y guardadas en base64 (`data`).
+  Firebase Storage exige el plan de pago, y así cabe todo en el gratuito.
 
 ## Versión anterior (temporal)
 

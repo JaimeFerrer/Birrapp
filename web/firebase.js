@@ -143,7 +143,7 @@ export async function getBar(id) {
 
 export async function getMyBars(uid) {
   const snap = await friendly(getDocs(query(collection(db, 'bars'), where('createdBy', '==', uid))));
-  return snap.docs.map(read).sort((a, b) => b.createdAt - a.createdAt);
+  return snap.docs.map(read).sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis());
 }
 
 function cleanReport({ price, hasTapa, tapaType }) {
@@ -155,9 +155,58 @@ function cleanReport({ price, hasTapa, tapaType }) {
   return { price, hasTapa: Boolean(hasTapa), tapaType: tapa || null };
 }
 
+// ---------- Fotos ----------
+
+// Las fotos se guardan comprimidas dentro de Firestore (Storage pide el plan de
+// pago). Cada una va en su propio documento para no hacer pesada la lista de bares.
+const PHOTO_MAX_SIDE = 1280;
+const PHOTO_MAX_CHARS = 700_000; // un documento de Firestore admite hasta 1 MiB
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+// Reduce la foto del móvil (varios MB) a un JPEG de unos cientos de KB.
+export async function compressPhoto(file) {
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  } catch {
+    throw userError('No se ha podido leer la foto. Prueba con otra en formato JPG o PNG.');
+  }
+  let side = PHOTO_MAX_SIDE;
+  for (let quality = 0.8; ; quality -= 0.1) {
+    const scale = Math.min(1, side / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((resolve) => { canvas.toBlob(resolve, 'image/jpeg', quality); });
+    const dataUrl = await blobToDataUrl(blob);
+    if (dataUrl.length <= PHOTO_MAX_CHARS) return dataUrl;
+    if (quality < 0.5) {
+      side = Math.round(side * 0.75);
+      quality = 0.8;
+    }
+  }
+}
+
+export async function getPhotos(barId) {
+  const snap = await friendly(getDocs(query(collection(db, 'bars', barId, 'photos'), orderBy('createdAt', 'desc'), limit(12))));
+  // Las más nuevas primero y, de las subidas a la vez, la cerveza antes que la tapa.
+  return snap.docs.map(read).sort((a, b) => (b.createdAt.toMillis() - a.createdAt.toMillis())
+    || (a.kind === 'beer' ? -1 : 0) - (b.kind === 'beer' ? -1 : 0));
+}
+
 // Crea el bar y su primer precio a la vez. Cada bar guarda un resumen (último
 // precio, nº de opiniones y suma de precios) para pintar el mapa con una sola lectura.
-export async function addBar(user, { name, address, lat, lng, ...report }) {
+// `photos`: [{ kind: 'beer' | 'tapa', data: dataUrl de compressPhoto }].
+export async function addBar(user, { name, address, lat, lng, photos = [], ...report }) {
   name = String(name).trim();
   if (!name) throw userError('El nombre del bar es obligatorio');
   const r = cleanReport(report);
@@ -178,6 +227,11 @@ export async function addBar(user, { name, address, lat, lng, ...report }) {
     lastReportId: reportRef.id,
   });
   batch.set(reportRef, { userId: user.uid, username: user.username, ...r, createdAt: serverTimestamp() });
+  for (const photo of photos) {
+    batch.set(doc(collection(barRef, 'photos')), {
+      kind: photo.kind, data: photo.data, userId: user.uid, username: user.username, createdAt: serverTimestamp(),
+    });
+  }
   await friendly(batch.commit());
   return barRef.id;
 }
