@@ -135,10 +135,6 @@ test('añadir bar y actualizar precio', async () => {
   assert.equal((await call('/auth/me/bars', { token: luis })).body.bars.length, 0);
   assert.equal((await call('/auth/me/bars')).status, 401);
 
-  const exported = await call('/export');
-  assert.deepEqual(exported.body.bars.map((b) => [b.name, b.created_by]), [['Bar Manolo', 'ana']]);
-  assert.deepEqual(exported.body.reports.map((r) => [r.username, r.price, r.has_tapa]), [['ana', 2.5, true], ['luis', 3, false]]);
-
   const list = await call('/bars');
   assert.equal(list.body.bars.length, 1);
   assert.equal(list.body.bars[0].price, 3);

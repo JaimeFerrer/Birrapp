@@ -35,16 +35,6 @@ service cloud.firestore {
         && report.tapaType == bar.tapaType;
     }
 
-    // Importación única de los datos de la versión anterior (Render + Turso).
-    // Solo la cuenta del dueño de la app, y solo hasta el 1 de noviembre de 2026.
-    // Se puede borrar después de importar.
-    function isImporter() {
-      return signedIn()
-        && request.time < timestamp.date(2026, 11, 1)
-        && hashing.sha256(request.auth.token.email).toHexString().lower()
-          == '63f61c0a3d33fc453a402b2da0db5d7766643f5b57c226b31b160c66c6849239';
-    }
-
     match /users/{userId} {
       allow read: if true;
       allow create: if signedIn() && request.auth.uid == userId
@@ -68,7 +58,7 @@ service cloud.firestore {
 
     match /bars/{barId} {
       allow read: if true;
-      allow create: if (signedIn() && validNewBar()) || (isImporter() && validImportedBar());
+      allow create: if signedIn() && validNewBar();
       allow update: if signedIn() && validBarUpdate();
       allow delete: if false;
 
@@ -106,19 +96,9 @@ service cloud.firestore {
           && matchesReport(d, report);
       }
 
-      function validImportedBar() {
-        let d = request.resource.data;
-        return barId.matches('legacy-[0-9]+')
-          && d.imported == true
-          && d.name is string && d.name.size() > 0
-          && d.lat is number && d.lng is number
-          && validPrice(d.price) && validTapa(d)
-          && d.reportCount is int && d.priceSum is number;
-      }
-
       match /reports/{reportId} {
         allow read: if true;
-        allow create: if (signedIn() && validNewReport()) || (isImporter() && validImportedReport());
+        allow create: if signedIn() && validNewReport();
         allow update, delete: if false;
 
         function validNewReport() {
@@ -130,14 +110,6 @@ service cloud.firestore {
             && validTapa(d)
             && d.createdAt == request.time
             && getAfter(/databases/$(database)/documents/bars/$(barId)).data.lastReportId == reportId;
-        }
-
-        function validImportedReport() {
-          let d = request.resource.data;
-          return reportId.matches('legacy-[0-9]+')
-            && d.imported == true
-            && validPrice(d.price) && validTapa(d)
-            && d.username is string;
         }
       }
     }

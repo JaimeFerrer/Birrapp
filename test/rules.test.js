@@ -7,7 +7,7 @@ const {
   initializeTestEnvironment, assertSucceeds, assertFails,
 } = require('@firebase/rules-unit-testing');
 const {
-  doc, setDoc, getDoc, updateDoc, deleteDoc, writeBatch, serverTimestamp, collection, Timestamp,
+  doc, setDoc, getDoc, updateDoc, deleteDoc, writeBatch, serverTimestamp, collection
 } = require('firebase/firestore');
 
 let env;
@@ -22,7 +22,7 @@ before(async () => {
 after(() => env.cleanup());
 beforeEach(() => env.clearFirestore());
 
-const as = (uid, email = `${uid}@example.com`) => env.authenticatedContext(uid, { email }).firestore();
+const as = (uid) => env.authenticatedContext(uid, { email: `${uid}@example.com` }).firestore();
 const anon = () => env.unauthenticatedContext().firestore();
 
 async function registerProfile(db, uid, username) {
@@ -125,29 +125,4 @@ test('precios: se añaden a tu nombre y actualizan el resumen correctamente', as
     userId: 'luis', username: 'luis', price: 1, hasTapa: false, tapaType: null, createdAt: serverTimestamp(),
   }));
   await assertFails(updateDoc(luisBar, { price: 0.5 }));
-});
-
-test('importación: solo la cuenta del dueño y con ids legacy', async () => {
-  const owner = as('jaime', 'jaimefer450@gmail.com');
-  const other = as('pepe', 'pepe@example.com');
-  const imported = {
-    name: 'Bar Viejo', address: null, lat: 40.4, lng: -3.7, createdBy: 'legacy', createdByName: 'alguien',
-    createdAt: Timestamp.fromDate(new Date('2026-10-09T10:00:00Z')),
-    price: 2, hasTapa: false, tapaType: null, priceUpdatedAt: Timestamp.now(),
-    reportCount: 1, priceSum: 2, lastReportId: 'legacy-1', imported: true,
-  };
-  const report = {
-    userId: 'legacy', username: 'alguien', price: 2, hasTapa: false, tapaType: null,
-    createdAt: Timestamp.now(), imported: true,
-  };
-  await assertFails(setDoc(doc(other, 'bars', 'legacy-1'), imported));
-  await assertFails(setDoc(doc(owner, 'bars', 'cualquier-id'), imported));
-  await assertSucceeds(setDoc(doc(owner, 'bars', 'legacy-1'), imported));
-  await assertFails(setDoc(doc(other, 'bars', 'legacy-1', 'reports', 'legacy-1'), report));
-  await assertSucceeds(setDoc(doc(owner, 'bars', 'legacy-1', 'reports', 'legacy-1'), report));
-  // Lo importado no se puede machacar después.
-  await assertFails(setDoc(doc(owner, 'bars', 'legacy-1'), { ...imported, price: 1 }));
-  // Pero cualquiera puede añadirle precios nuevos con normalidad.
-  await registerProfile(other, 'pepe', 'pepe');
-  await assertSucceeds(newReport(other, 'pepe', 'pepe', doc(other, 'bars', 'legacy-1'), { reportCount: 1, priceSum: 2 }));
 });

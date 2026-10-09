@@ -266,21 +266,6 @@ function createApp(db, { sendMail = createMailer(), appUrl = process.env.APP_URL
     res.status(201).json({ bar: await barSummary(barId) });
   }));
 
-  // Exportación para pasar los datos a la versión de Firebase (solo datos que
-  // ya son públicos en la app: bares, precios y nombres de usuario).
-  app.get('/api/export', wrap(async (_req, res) => {
-    const bars = await db.all(
-      `SELECT b.id, b.name, b.address, b.lat, b.lng, b.created_at, u.username AS created_by
-       FROM bars b JOIN users u ON u.id = b.created_by ORDER BY b.id`
-    );
-    const reports = await db.all(
-      `SELECT r.id, r.bar_id, r.price, r.has_tapa, r.tapa_type, r.created_at, u.username
-       FROM reports r JOIN users u ON u.id = r.user_id ORDER BY r.id`
-    );
-    res.set('Access-Control-Allow-Origin', '*');
-    res.json({ bars, reports: reports.map(formatBar) });
-  }));
-
   app.use('/api', (_req, res) => res.status(404).json({ error: 'No encontrado' }));
 
   return app;
