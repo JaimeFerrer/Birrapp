@@ -127,6 +127,10 @@ async function submitting(form, fn) {
 
 // ---------- Usuarios ----------
 
+function updateFab() {
+  $('#add-bar-btn').hidden = !state.user || state.placing;
+}
+
 function setUser(user, token) {
   state.user = user;
   if (token !== undefined) {
@@ -134,57 +138,145 @@ function setUser(user, token) {
     if (token) localStorage.setItem('birrapp_token', token);
     else localStorage.removeItem('birrapp_token');
   }
-  const logged = Boolean(user);
-  $('#login-btn').hidden = logged;
-  $('#logout-btn').hidden = !logged;
-  $('#add-bar-btn').hidden = !logged;
-  $('#user-name').hidden = !logged;
-  $('#user-name').textContent = logged ? `🙋 ${user.username}` : '';
+  $('#account-btn').textContent = user ? 'Mi cuenta' : 'Entrar';
+  updateFab();
 }
 
-function showAuth(mode = 'login') {
-  const node = $('#auth-template').content.cloneNode(true);
-  const isLogin = mode === 'login';
-  $('[data-title]', node).textContent = isLogin ? 'Entrar' : 'Crear usuario';
-  $('[data-submit]', node).textContent = isLogin ? 'Entrar' : 'Crear cuenta';
-  $('[data-switch-text]', node).textContent = isLogin ? '¿No tienes cuenta?' : '¿Ya tienes cuenta?';
-  $('[data-switch]', node).textContent = isLogin ? 'Crear usuario' : 'Entrar';
-  $('input[name="password"]', node).autocomplete = isLogin ? 'current-password' : 'new-password';
-  $('[data-switch]', node).addEventListener('click', (e) => {
+// Formulario de cuenta: entrar, crear cuenta, olvidé la contraseña o
+// elegir una nueva (al abrir el enlace del correo).
+const AUTH_MODES = {
+  login: {
+    title: 'Entrar',
+    fields: `
+      <label>Correo electrónico <input name="email" type="email" autocomplete="email" inputmode="email" required></label>
+      <label>Contraseña <input name="password" type="password" autocomplete="current-password" required></label>`,
+    submit: 'Entrar',
+    links: `
+      <p><a href="#" class="link" data-mode="forgot">¿Has olvidado tu contraseña?</a></p>
+      <p class="muted">¿No tienes cuenta? <a href="#" class="link" data-mode="register">Crear cuenta</a></p>`,
+    async send(data) {
+      return api('/auth/login', { method: 'POST', body: data });
+    },
+  },
+  register: {
+    title: 'Crear cuenta',
+    fields: `
+      <label>Correo electrónico <input name="email" type="email" autocomplete="email" inputmode="email" required></label>
+      <label>Nombre que verán los demás
+        <input name="username" autocomplete="nickname" required minlength="3" maxlength="30" pattern="[\\w.\\-]+"
+          title="Letras, números, punto, guion o guion bajo">
+      </label>
+      <label>Contraseña <input name="password" type="password" autocomplete="new-password" required minlength="6"></label>`,
+    submit: 'Crear cuenta',
+    links: '<p class="muted">¿Ya tienes cuenta? <a href="#" class="link" data-mode="login">Entrar</a></p>',
+    async send(data) {
+      return api('/auth/register', { method: 'POST', body: data });
+    },
+  },
+  forgot: {
+    title: 'Recuperar contraseña',
+    intro: 'Te enviaremos un correo con un enlace para elegir una contraseña nueva.',
+    fields: '<label>Correo electrónico <input name="email" type="email" autocomplete="email" inputmode="email" required></label>',
+    submit: 'Enviar enlace',
+    links: '<p class="muted"><a href="#" class="link" data-mode="login">Volver a entrar</a></p>',
+    async send(data) {
+      await api('/auth/forgot', { method: 'POST', body: data });
+      return null;
+    },
+    done: 'Si hay una cuenta con ese correo, te hemos enviado un enlace. Mira también en la carpeta de spam.',
+  },
+  reset: {
+    title: 'Nueva contraseña',
+    fields: '<label>Nueva contraseña <input name="password" type="password" autocomplete="new-password" required minlength="6"></label>',
+    submit: 'Guardar contraseña',
+    links: '',
+    async send(data, extra) {
+      return api('/auth/reset', { method: 'POST', body: { ...data, token: extra.token } });
+    },
+  },
+};
+
+function showAuth(mode = 'login', extra = {}) {
+  const config = AUTH_MODES[mode];
+  const node = fragment(`
+    <h2>${config.title}</h2>
+    ${config.intro ? `<p class="muted">${config.intro}</p>` : ''}
+    <form class="form">
+      ${config.fields}
+      <p class="error"></p>
+      <button class="btn primary block">${config.submit}</button>
+    </form>
+    ${config.links}
+  `);
+  node.querySelectorAll('[data-mode]').forEach((a) => a.addEventListener('click', (e) => {
     e.preventDefault();
-    showAuth(isLogin ? 'register' : 'login');
-  });
-  const form = $('[data-form]', node);
+    showAuth(a.dataset.mode);
+  }));
+  const form = $('form', node);
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     submitting(form, async () => {
-      const data = Object.fromEntries(new FormData(form));
-      const { user, token } = await api(isLogin ? '/auth/login' : '/auth/register', { method: 'POST', body: data });
-      setUser(user, token);
-      closePanel();
+      const result = await config.send(Object.fromEntries(new FormData(form)), extra);
+      if (result) {
+        setUser(result.user, result.token);
+        closePanel();
+      } else {
+        form.replaceWith(fragment(`<p>${config.done}</p>`));
+      }
     });
   });
   openPanel(node);
 }
 
-$('#login-btn').addEventListener('click', () => showAuth('login'));
-$('#logout-btn').addEventListener('click', async () => {
-  await api('/auth/logout', { method: 'POST' }).catch(() => {});
-  setUser(null, null);
-  closePanel();
-});
+function showAccount() {
+  const { user } = state;
+  const node = fragment(`
+    <h2>Mi cuenta</h2>
+    <p><strong>${escapeHtml(user.username)}</strong></p>
+    ${user.email ? '' : '<p class="error">Añade tu correo para poder recuperar la contraseña si la olvidas.</p>'}
+    <form class="form">
+      <label>Correo electrónico
+        <input name="email" type="email" autocomplete="email" inputmode="email" required value="${escapeHtml(user.email || '')}">
+      </label>
+      <p class="error"></p>
+      <button class="btn block">Guardar correo</button>
+    </form>
+    <div class="section">
+      <button class="btn block" data-logout>Cerrar sesión</button>
+    </div>
+  `);
+  const form = $('form', node);
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    submitting(form, async () => {
+      const { user: updated } = await api('/auth/me', { method: 'PATCH', body: Object.fromEntries(new FormData(form)) });
+      setUser(updated);
+      showAccount();
+    });
+  });
+  $('[data-logout]', node).addEventListener('click', async () => {
+    await api('/auth/logout', { method: 'POST' }).catch(() => {});
+    setUser(null, null);
+    closePanel();
+  });
+  openPanel(node);
+}
+
+$('#account-btn').addEventListener('click', () => (state.user ? showAccount() : showAuth('login')));
 
 // ---------- Añadir bar ----------
 
 function startPlacing() {
   closePanel();
   state.placing = true;
+  updateFab();
   $('#placing-hint').hidden = false;
   map.getContainer().style.cursor = 'crosshair';
 }
 
 function stopPlacing() {
   state.placing = false;
+  updateFab();
   $('#placing-hint').hidden = true;
   map.getContainer().style.cursor = '';
   if (state.draftMarker) {
@@ -201,6 +293,7 @@ function placeDraft(latlng) {
   }
   $('#placing-hint').hidden = true;
   state.placing = false;
+  updateFab();
   map.getContainer().style.cursor = '';
   if (panel.hidden) showAddBarForm();
 }
@@ -317,6 +410,12 @@ async function showBar(id) {
 // ---------- Arranque ----------
 
 (async function init() {
+  // Enlace del correo para cambiar la contraseña: /?reset=<token>
+  const resetToken = new URLSearchParams(location.search).get('reset');
+  if (resetToken) {
+    history.replaceState(null, '', location.pathname);
+    showAuth('reset', { token: resetToken });
+  }
   if (state.token) {
     try {
       const { user } = await api('/auth/me');

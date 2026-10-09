@@ -17,4 +17,8 @@ function newToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
-module.exports = { hashPassword, verifyPassword, newToken };
+function hashToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+module.exports = { hashPassword, verifyPassword, newToken, hashToken };

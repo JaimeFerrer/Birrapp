@@ -4,6 +4,7 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    email         TEXT,
     password_hash TEXT NOT NULL,
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -37,13 +38,32 @@ const SCHEMA = `
   );
 
   CREATE INDEX IF NOT EXISTS reports_bar_idx ON reports(bar_id, id);
+
+  -- Enlaces para restablecer la contraseña. Solo se guarda el hash del token.
+  CREATE TABLE IF NOT EXISTS password_resets (
+    token_hash TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TEXT NOT NULL,
+    used_at    TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
 `;
+
+// Cambios sobre bases de datos creadas con versiones anteriores.
+async function migrate(client) {
+  const { rows } = await client.execute('PRAGMA table_info(users)');
+  if (!rows.some((col) => col.name === 'email')) {
+    await client.execute('ALTER TABLE users ADD COLUMN email TEXT');
+  }
+  await client.execute('CREATE UNIQUE INDEX IF NOT EXISTS users_email_idx ON users(email)');
+}
 
 // `url` puede ser un fichero local (file:data/birrapp.db), ":memory:" o una
 // base de datos remota de Turso (libsql://...), que necesita `authToken`.
 async function openDatabase(url, authToken) {
   const client = createClient({ url, authToken });
   await client.executeMultiple(SCHEMA);
+  await migrate(client);
 
   return {
     async get(sql, args = []) {

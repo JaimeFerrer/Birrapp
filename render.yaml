@@ -14,3 +14,8 @@ services:
         sync: false
       - key: TURSO_AUTH_TOKEN
         sync: false
+      # Envío de correos (recuperar contraseña) con Brevo.
+      - key: BREVO_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false

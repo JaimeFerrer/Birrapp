@@ -1,6 +1,7 @@
 const path = require('node:path');
 const express = require('express');
-const { hashPassword, verifyPassword, newToken } = require('./auth');
+const { hashPassword, verifyPassword, newToken, hashToken } = require('./auth');
+const { createMailer } = require('./mailer');
 
 const BAR_SUMMARY_SQL = `
   SELECT b.id, b.name, b.address, b.lat, b.lng, b.created_at,
@@ -34,11 +35,21 @@ function parseReport(body) {
   return { price: Math.round(price * 100) / 100, hasTapa: body.has_tapa, tapaType: tapaType || null };
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function parseEmail(value) {
+  const email = String(value ?? '').trim().toLowerCase();
+  return email.length <= 254 && EMAIL_RE.test(email) ? email : null;
+}
+
+const publicUser = ({ id, username, email }) => ({ id, username, email: email ?? null });
+
 // Express 4 no captura errores de handlers async por sí solo.
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
-function createApp(db) {
+function createApp(db, { sendMail = createMailer(), appUrl = process.env.APP_URL || process.env.RENDER_EXTERNAL_URL } = {}) {
   const app = express();
+  app.set('trust proxy', 1);
   app.use(express.json());
   app.use(express.static(path.join(__dirname, '..', 'public')));
   app.use('/vendor/leaflet', express.static(path.dirname(require.resolve('leaflet/dist/leaflet.js'))));
@@ -49,7 +60,7 @@ function createApp(db) {
     req.token = token;
     req.user = token
       ? await db.get(
-        'SELECT u.id, u.username FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?',
+        'SELECT u.id, u.username, u.email FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?',
         [token]
       )
       : null;
@@ -75,32 +86,43 @@ function createApp(db) {
   // --- Usuarios ---
 
   app.post('/api/auth/register', wrap(async (req, res) => {
+    const email = parseEmail(req.body.email);
     const username = String(req.body.username ?? '').trim();
     const password = String(req.body.password ?? '');
+    if (!email) {
+      return res.status(400).json({ error: 'Escribe un correo electrónico válido' });
+    }
     if (!/^[\w.-]{3,30}$/.test(username)) {
-      return res.status(400).json({ error: 'El usuario debe tener 3-30 caracteres (letras, números, . _ -)' });
+      return res.status(400).json({ error: 'El nombre debe tener 3-30 caracteres (letras, números, . _ -)' });
     }
     if (password.length < 6) {
       return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
     }
+    if (await db.get('SELECT 1 FROM users WHERE email = ?', [email])) {
+      return res.status(409).json({ error: 'Ya hay una cuenta con ese correo' });
+    }
     if (await db.get('SELECT 1 FROM users WHERE username = ?', [username])) {
-      return res.status(409).json({ error: 'Ese usuario ya existe' });
+      return res.status(409).json({ error: 'Ese nombre ya está cogido, prueba con otro' });
     }
     const { lastInsertRowid: id } = await db.run(
-      'INSERT INTO users (username, password_hash) VALUES (?, ?)',
-      [username, hashPassword(password)]
+      'INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
+      [username, email, hashPassword(password)]
     );
-    res.status(201).json({ token: await startSession(id), user: { id, username } });
+    res.status(201).json({ token: await startSession(id), user: { id, username, email } });
   }));
 
   app.post('/api/auth/login', wrap(async (req, res) => {
-    const username = String(req.body.username ?? '').trim();
+    // Se entra con el correo. Las cuentas antiguas, creadas antes de pedir
+    // correo, pueden seguir entrando con su nombre de usuario.
+    const login = String(req.body.email ?? req.body.username ?? '').trim();
     const password = String(req.body.password ?? '');
-    const user = await db.get('SELECT id, username, password_hash FROM users WHERE username = ?', [username]);
+    const user = login.includes('@')
+      ? await db.get('SELECT id, username, email, password_hash FROM users WHERE email = ?', [login.toLowerCase()])
+      : await db.get('SELECT id, username, email, password_hash FROM users WHERE username = ?', [login]);
     if (!user || !verifyPassword(password, user.password_hash)) {
-      return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
+      return res.status(401).json({ error: 'Correo o contraseña incorrectos' });
     }
-    res.json({ token: await startSession(user.id), user: { id: user.id, username: user.username } });
+    res.json({ token: await startSession(user.id), user: publicUser(user) });
   }));
 
   app.post('/api/auth/logout', requireAuth, wrap(async (req, res) => {
@@ -109,8 +131,77 @@ function createApp(db) {
   }));
 
   app.get('/api/auth/me', requireAuth, (req, res) => {
-    res.json({ user: req.user });
+    res.json({ user: publicUser(req.user) });
   });
+
+  // Cambiar el correo (o añadirlo en cuentas antiguas que no lo tenían).
+  app.patch('/api/auth/me', requireAuth, wrap(async (req, res) => {
+    const email = parseEmail(req.body.email);
+    if (!email) return res.status(400).json({ error: 'Escribe un correo electrónico válido' });
+    if (await db.get('SELECT 1 FROM users WHERE email = ? AND id != ?', [email, req.user.id])) {
+      return res.status(409).json({ error: 'Ya hay una cuenta con ese correo' });
+    }
+    await db.run('UPDATE users SET email = ? WHERE id = ?', [email, req.user.id]);
+    res.json({ user: publicUser({ ...req.user, email }) });
+  }));
+
+  // Envía un enlace para elegir una contraseña nueva. Responde lo mismo
+  // exista o no la cuenta, para no revelar qué correos están registrados.
+  app.post('/api/auth/forgot', wrap(async (req, res) => {
+    const email = parseEmail(req.body.email);
+    if (!email) return res.status(400).json({ error: 'Escribe un correo electrónico válido' });
+    const user = await db.get('SELECT id, username FROM users WHERE email = ?', [email]);
+    const recent = user && await db.get(
+      `SELECT 1 FROM password_resets
+       WHERE user_id = ? AND used_at IS NULL AND created_at > datetime('now', '-2 minutes')`,
+      [user.id]
+    );
+    if (user && !recent) {
+      const token = newToken();
+      await db.run(
+        `INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES (?, ?, datetime('now', '+1 hour'))`,
+        [hashToken(token), user.id]
+      );
+      const link = `${appUrl || `${req.protocol}://${req.get('host')}`}/?reset=${token}`;
+      try {
+        await sendMail({
+          to: email,
+          subject: 'Cambia tu contraseña de Birrapp',
+          text: `Hola ${user.username}:\n\nPara elegir una contraseña nueva abre este enlace (caduca en 1 hora):\n${link}\n\nSi no lo has pedido tú, ignora este correo.`,
+          html: `<p>Hola ${user.username}:</p><p>Para elegir una contraseña nueva pulsa aquí (caduca en 1 hora):</p><p><a href="${link}">Cambiar contraseña</a></p><p>Si no lo has pedido tú, ignora este correo.</p>`,
+        });
+      } catch (err) {
+        console.error(err);
+        return res.status(502).json({ error: 'No hemos podido enviar el correo. Inténtalo de nuevo en un rato.' });
+      }
+    }
+    res.json({ ok: true });
+  }));
+
+  app.post('/api/auth/reset', wrap(async (req, res) => {
+    const token = String(req.body.token ?? '');
+    const password = String(req.body.password ?? '');
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+    }
+    const tokenHash = hashToken(token);
+    const reset = await db.get(
+      `SELECT user_id FROM password_resets
+       WHERE token_hash = ? AND used_at IS NULL AND expires_at > datetime('now')`,
+      [tokenHash]
+    );
+    if (!reset) {
+      return res.status(400).json({ error: 'El enlace no es válido o ha caducado. Pide uno nuevo.' });
+    }
+    // Se cierran las sesiones abiertas: quien tuviera la contraseña antigua deja de tener acceso.
+    await db.batch([
+      ['UPDATE users SET password_hash = ? WHERE id = ?', [hashPassword(password), reset.user_id]],
+      ["UPDATE password_resets SET used_at = datetime('now') WHERE token_hash = ?", [tokenHash]],
+      ['DELETE FROM sessions WHERE user_id = ?', [reset.user_id]],
+    ]);
+    const user = await db.get('SELECT id, username, email FROM users WHERE id = ?', [reset.user_id]);
+    res.json({ token: await startSession(user.id), user: publicUser(user) });
+  }));
 
   // --- Bares ---
 
