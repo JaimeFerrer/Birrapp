@@ -49,11 +49,11 @@ npm run dev:local    # en otra
 
 ```bash
 npx firebase login
-npx firebase use --add      # elige el proyecto y ponle el alias "default"
 npm run deploy              # compila y sube la web y las reglas de seguridad
 ```
 
-La app queda en `https://<id-del-proyecto>.web.app`. Cada vez que cambie algo,
+El proyecto (`birrap-c2921`) ya está elegido en `.firebaserc`. La app queda en
+https://birrap-c2921.web.app. Cada vez que cambie algo,
 basta con volver a ejecutar `npm run deploy`.
 
 ## Importar los datos de la versión anterior
@@ -63,7 +63,7 @@ Para pasar sus bares y precios:
 
 1. Publica la versión nueva y crea tu cuenta con el correo del dueño de la app
    (el que está, cifrado, en `isImporter()` de `firestore.rules`).
-2. Abre `https://<id-del-proyecto>.web.app/importar.html` y pulsa **Importar**.
+2. Abre `https://birrap-c2921.web.app/importar.html` y pulsa **Importar**.
    Si el servidor antiguo está dormido, la página espera a que despierte.
 3. Los bares que creaste tú pasan a tu cuenta; los de los demás conservan su
    nombre en el historial. Si se repite, lo ya importado se salta.
