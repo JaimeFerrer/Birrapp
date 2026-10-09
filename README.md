@@ -14,7 +14,8 @@ pruebe el bar puede actualizar el precio y la tapa.
   - **Hosting**: aloja la web. Siempre está encendido, así que la app abre al
     instante.
 - **Vite** para empaquetar la web (`web/`) en `dist/`.
-- **Leaflet + OpenStreetMap** para el mapa (sin API key).
+- **Leaflet + OpenStreetMap** para el mapa (sin API key). Tu ubicación sale
+  como un punto azul que te sigue, con un botón para volver a centrarla.
 - Instalable como app en el móvil y en el ordenador (`web/public/manifest.webmanifest`).
 
 ## Puesta en marcha
@@ -92,7 +93,9 @@ npm test     # reglas de seguridad de Firestore contra el emulador (necesita Jav
 - `bars/{id}`: datos del bar y resumen del último precio (`price`, `hasTapa`,
   `tapaType`, `reportCount`, `priceSum`, `lastReportId`…), para pintar el mapa
   con una sola lectura.
-- `bars/{id}/reports/{id}`: cada precio que deja un usuario. Cada uno puede
+- `bars/{id}/reports/{id}`: cada precio que deja un usuario. Si ponen tapa,
+  lleva su valoración obligatoria de 1 a 5 estrellas (`tapaRating`); el bar
+  guarda `ratingSum` y `ratingCount` para mostrar la media. Cada uno puede
   borrar los suyos (menos el único precio de un bar); al borrar, el resumen del
   bar se recalcula y `lastDeletedReportId` indica qué precio se ha quitado.
 - Quien crea un bar puede borrarlo; la app borra a la vez sus precios y fotos.

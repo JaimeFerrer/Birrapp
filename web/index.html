@@ -46,9 +46,21 @@
       <label class="inline"><input type="radio" name="has_tapa" value="yes" required> Sí</label>
       <label class="inline"><input type="radio" name="has_tapa" value="no"> No</label>
     </fieldset>
-    <label data-tapa-type hidden>Tipo de tapa
-      <input name="tapa_type" maxlength="100" placeholder="Aceitunas, patatas bravas, montadito…">
-    </label>
+    <div class="tapa-details" data-tapa-type hidden>
+      <label>Tipo de tapa
+        <input name="tapa_type" maxlength="100" placeholder="Aceitunas, patatas bravas, montadito…">
+      </label>
+      <fieldset class="stars">
+        <legend>¿Qué tal la tapa?</legend>
+        <div class="stars-row">
+          <label><input type="radio" name="tapa_rating" value="1"><span aria-hidden="true">★</span><span class="sr-only">1 estrella</span></label>
+          <label><input type="radio" name="tapa_rating" value="2"><span aria-hidden="true">★</span><span class="sr-only">2 estrellas</span></label>
+          <label><input type="radio" name="tapa_rating" value="3"><span aria-hidden="true">★</span><span class="sr-only">3 estrellas</span></label>
+          <label><input type="radio" name="tapa_rating" value="4"><span aria-hidden="true">★</span><span class="sr-only">4 estrellas</span></label>
+          <label><input type="radio" name="tapa_rating" value="5"><span aria-hidden="true">★</span><span class="sr-only">5 estrellas</span></label>
+        </div>
+      </fieldset>
+    </div>
   </template>
 
   <script type="module" src="/main.js"></script>

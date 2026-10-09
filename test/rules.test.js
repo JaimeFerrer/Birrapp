@@ -32,28 +32,36 @@ async function registerProfile(db, uid, username) {
   return batch.commit();
 }
 
+// Lo que el bar copia de su último precio (la valoración de la tapa va a la media).
+const latest = ({ price, hasTapa, tapaType }) => ({ price, hasTapa, tapaType });
+
 function newBar(db, uid, username, overrides = {}, reportOverrides = {}) {
   const barRef = doc(collection(db, 'bars'));
   const reportRef = doc(collection(barRef, 'reports'));
-  const r = { price: 2.5, hasTapa: true, tapaType: 'Bravas' };
+  const r = { price: 2.5, hasTapa: true, tapaType: 'Bravas', tapaRating: 4 };
   const batch = writeBatch(db);
   batch.set(barRef, {
     name: 'Bar Manolo', address: null, lat: 40.4, lng: -3.7,
     createdBy: uid, createdByName: username, createdAt: serverTimestamp(),
-    ...r, priceUpdatedAt: serverTimestamp(), reportCount: 1, priceSum: r.price, lastReportId: reportRef.id,
+    ...latest(r), priceUpdatedAt: serverTimestamp(), reportCount: 1, priceSum: r.price,
+    ratingSum: 4, ratingCount: 1, lastReportId: reportRef.id,
     ...overrides,
   });
   batch.set(reportRef, { userId: uid, username, ...r, createdAt: serverTimestamp(), ...reportOverrides });
   return { barRef, commit: () => batch.commit() };
 }
 
-function newReport(db, uid, username, barRef, current, r = { price: 3, hasTapa: false, tapaType: null }, barOverrides = {}) {
+// `current`: { reportCount, priceSum, ratingSum, ratingCount } del bar antes del precio nuevo.
+function newReport(db, uid, username, barRef, current, r = { price: 3, hasTapa: false, tapaType: null, tapaRating: null }, barOverrides = {}) {
   const reportRef = doc(collection(barRef, 'reports'));
   const batch = writeBatch(db);
   batch.set(reportRef, { userId: uid, username, ...r, createdAt: serverTimestamp() });
   batch.update(barRef, {
-    ...r, priceUpdatedAt: serverTimestamp(), reportCount: current.reportCount + 1,
-    priceSum: current.priceSum + r.price, lastReportId: reportRef.id, ...barOverrides,
+    ...latest(r), priceUpdatedAt: serverTimestamp(), reportCount: current.reportCount + 1,
+    priceSum: current.priceSum + r.price,
+    ratingSum: (current.ratingSum ?? 4) + (r.tapaRating ?? 0),
+    ratingCount: (current.ratingCount ?? 1) + (r.tapaRating == null ? 0 : 1),
+    lastReportId: reportRef.id, ...barOverrides,
   });
   return batch.commit();
 }
@@ -87,6 +95,15 @@ test('bares: solo con sesión, a tu nombre y con el precio cuadrado', async () =
   // Precio fuera de rango o tapa mal puesta.
   await assertFails(newBar(ana, 'ana', 'ana', { price: 0, priceSum: 0 }, { price: 0 }).commit());
   await assertFails(newBar(ana, 'ana', 'ana', { hasTapa: false }, { hasTapa: false }).commit());
+  // Tapa sin valorar, valoración fuera de rango o media que no cuadra.
+  await assertFails(newBar(ana, 'ana', 'ana', { ratingSum: 0, ratingCount: 0 }, { tapaRating: null }).commit());
+  await assertFails(newBar(ana, 'ana', 'ana', { ratingSum: 6 }, { tapaRating: 6 }).commit());
+  await assertFails(newBar(ana, 'ana', 'ana', { ratingSum: 5 }).commit());
+  // Sin tapa no hay valoración.
+  await assertFails(newBar(ana, 'ana', 'ana', { hasTapa: false, tapaType: null, ratingSum: 3 },
+    { hasTapa: false, tapaType: null, tapaRating: 3 }).commit());
+  await assertSucceeds(newBar(ana, 'ana', 'ana', { hasTapa: false, tapaType: null, ratingSum: 0, ratingCount: 0 },
+    { hasTapa: false, tapaType: null, tapaRating: null }).commit());
   // Ubicación imposible o campos de más.
   await assertFails(newBar(ana, 'ana', 'ana', { lat: 200 }).commit());
   await assertFails(newBar(ana, 'ana', 'ana', { hacked: true }).commit());
@@ -208,7 +225,7 @@ test('borrar: el bar solo su creador; precios y fotos, cada uno los suyos', asyn
     return batch.commit();
   };
   const backToAna = {
-    reportCount: 1, priceSum: 2.5, price: 2.5, hasTapa: true, tapaType: 'Bravas',
+    reportCount: 1, priceSum: 2.5, ratingSum: 4, ratingCount: 1, price: 2.5, hasTapa: true, tapaType: 'Bravas',
     priceUpdatedAt: anaReport.data().createdAt, lastReportId: anaReport.id,
   };
   // El precio de otro, sin tocar el resumen o con el resumen mal.
@@ -244,3 +261,25 @@ test('borrar: el bar solo su creador; precios y fotos, cada uno los suyos', asyn
   children.forEach((d) => batch.delete(d.ref));
   await assertSucceeds(batch.commit());
 });
+
+test('valoraciones: la media de la tapa sube y baja con cada precio', async () => {
+  const ana = as('ana');
+  const luis = as('luis');
+  await registerProfile(ana, 'ana', 'ana');
+  await registerProfile(luis, 'luis', 'luis');
+  const { barRef, commit } = newBar(ana, 'ana', 'ana');
+  await commit();
+  const luisBar = doc(luis, 'bars', barRef.id);
+  const current = { reportCount: 1, priceSum: 2.5, ratingSum: 4, ratingCount: 1 };
+  const tapa = (rating) => ({ price: 3, hasTapa: true, tapaType: 'Croqueta', tapaRating: rating });
+  // Valoración que no cuadra con la media, o tapa sin valorar.
+  await assertFails(newReport(luis, 'luis', 'luis', luisBar, current, tapa(2), { ratingSum: 9 }));
+  await assertFails(newReport(luis, 'luis', 'luis', luisBar, current, tapa(2), { ratingCount: 1 }));
+  await assertFails(newReport(luis, 'luis', 'luis', luisBar, current, { ...tapa(2), tapaRating: null }, { ratingSum: 4, ratingCount: 1 }));
+  await assertFails(newReport(luis, 'luis', 'luis', luisBar, current, { ...tapa(2), tapaRating: 2.5 }));
+  // Bien: media (4 + 2) / 2.
+  await assertSucceeds(newReport(luis, 'luis', 'luis', luisBar, current, tapa(2)));
+  const bar = (await getDoc(luisBar)).data();
+  if (bar.ratingSum !== 6 || bar.ratingCount !== 2) throw new Error('media incorrecta');
+});
+

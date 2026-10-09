@@ -39,7 +39,73 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; colaboradores de <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
 }).addTo(map);
 
-map.locate({ setView: true, maxZoom: 15 });
+// ---------- Tu ubicación ----------
+
+// Punto azul que te sigue mientras la app está abierta, con un círculo que
+// indica la precisión del GPS.
+const me = { latlng: null, marker: null, circle: null, centered: false, asked: false };
+// Capa propia por debajo de los marcadores de bares, para que el punto azul
+// nunca tape un precio ni impida tocarlo.
+map.createPane('me').style.zIndex = 550;
+const meIcon = L.divIcon({ className: 'me-marker', html: '<span class="me-dot"></span>', iconSize: [22, 22], iconAnchor: [11, 11] });
+
+const LocateControl = L.Control.extend({
+  options: { position: 'topleft' },
+  onAdd() {
+    const button = L.DomUtil.create('button', 'locate-control');
+    button.type = 'button';
+    button.title = 'Ir a mi ubicación';
+    button.setAttribute('aria-label', 'Ir a mi ubicación');
+    button.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/>
+      <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>`;
+    L.DomEvent.disableClickPropagation(button);
+    L.DomEvent.on(button, 'click', () => {
+      if (me.latlng) {
+        map.setView(me.latlng, Math.max(map.getZoom(), 16));
+      } else {
+        me.asked = true;
+        button.classList.add('waiting');
+        startLocating();
+      }
+    });
+    return button;
+  },
+});
+const locateControl = new LocateControl().addTo(map);
+
+function startLocating() {
+  map.locate({ watch: true, enableHighAccuracy: true, maximumAge: 10000 });
+}
+
+map.on('locationfound', (e) => {
+  me.latlng = e.latlng;
+  if (me.marker) {
+    me.marker.setLatLng(e.latlng);
+    me.circle.setLatLng(e.latlng).setRadius(e.accuracy);
+  } else {
+    me.circle = L.circle(e.latlng, {
+      radius: e.accuracy, interactive: false, color: '#1a73e8', weight: 1, fillColor: '#1a73e8', fillOpacity: 0.12, pane: 'me',
+    }).addTo(map);
+    me.marker = L.marker(e.latlng, { icon: meIcon, interactive: false, keyboard: false, pane: 'me' }).addTo(map);
+  }
+  locateControl.getContainer().classList.remove('waiting');
+  if (!me.centered || me.asked) {
+    map.setView(e.latlng, Math.max(map.getZoom(), me.asked ? 16 : 15));
+    me.centered = true;
+    me.asked = false;
+  }
+});
+
+map.on('locationerror', () => {
+  locateControl.getContainer().classList.remove('waiting');
+  if (me.asked) {
+    toast('No se ha podido obtener tu ubicación. Revisa que el navegador tenga permiso.');
+    me.asked = false;
+  }
+});
+
+startLocating();
 
 function priceIcon(bar) {
   const cls = bar.hasTapa ? 'price-marker tapa' : 'price-marker';
@@ -89,12 +155,22 @@ function fragment(html) {
 }
 
 // Campos de precio + tapa reutilizados al crear bar y al actualizar precio.
+// Si ponen tapa, es obligatorio valorarla con estrellas.
 function reportFields() {
   const fields = $('#report-fields-template').content.cloneNode(true);
-  const tapaType = $('[data-tapa-type]', fields);
+  const tapaDetails = $('[data-tapa-type]', fields);
+  const stars = [...fields.querySelectorAll('input[name="tapa_rating"]')];
   fields.querySelectorAll('input[name="has_tapa"]').forEach((radio) => {
-    radio.addEventListener('change', () => { tapaType.hidden = radio.value !== 'yes'; });
+    radio.addEventListener('change', () => {
+      tapaDetails.hidden = radio.value !== 'yes';
+      stars.forEach((star) => { star.required = !tapaDetails.hidden; });
+    });
   });
+  const paint = () => {
+    const value = Number(stars.find((s) => s.checked)?.value ?? 0);
+    stars.forEach((star) => star.parentElement.classList.toggle('on', Number(star.value) <= value));
+  };
+  stars.forEach((star) => star.addEventListener('change', paint));
   return fields;
 }
 
@@ -105,8 +181,13 @@ function readReport(form) {
     price: Number(data.get('price')),
     hasTapa,
     tapaType: hasTapa ? data.get('tapa_type') : '',
+    tapaRating: hasTapa ? Number(data.get('tapa_rating')) : null,
   };
 }
+
+// «★★★★☆» para una nota de 1 a 5 (redondeada).
+const starsText = (rating) => '★'.repeat(Math.round(rating)) + '☆'.repeat(5 - Math.round(rating));
+const decimal = (n) => n.toFixed(1).replace('.', ',');
 
 async function submitting(form, fn) {
   const button = $('button[type="submit"], button:not([type])', form);
@@ -322,7 +403,7 @@ function showAccount() {
         <button class="my-bar" data-bar="${escapeHtml(bar.id)}">
           <span class="my-bar-name">${escapeHtml(bar.name)}</span>
           <span class="my-bar-price">${euros(bar.price)}</span>
-          <span class="muted my-bar-tapa">${bar.hasTapa ? `Tapa: ${escapeHtml(bar.tapaType || 'sí')}` : 'Sin tapa'}</span>
+          <span class="muted my-bar-tapa">${bar.hasTapa ? `Tapa: ${escapeHtml(bar.tapaType || 'sí')}` : 'Sin tapa'}${bar.ratingCount ? ` · ★ ${decimal(bar.ratingSum / bar.ratingCount)}` : ''}</span>
         </button>
       </li>`).join('')}</ul>`));
     barsBox.querySelectorAll('[data-bar]').forEach((btn) => btn.addEventListener('click', () => {
@@ -377,6 +458,11 @@ $('#add-bar-btn').addEventListener('click', startPlacing);
 $('#cancel-place-btn').addEventListener('click', stopPlacing);
 $('#locate-btn').addEventListener('click', () => {
   const hint = $('#placing-hint span');
+  if (me.latlng) {
+    map.setView(me.latlng, 17);
+    placeDraft(me.latlng);
+    return;
+  }
   if (!navigator.geolocation) {
     hint.textContent = 'Tu navegador no permite obtener la ubicación. Toca el mapa donde está el bar.';
     return;
@@ -588,11 +674,17 @@ async function showBar(id) {
   const tapa = bar.hasTapa
     ? `<span class="badge yes">🍢 Tapa: ${escapeHtml(bar.tapaType || 'sí')}</span>`
     : '<span class="badge">Sin tapa</span>';
+  const rating = bar.ratingCount
+    ? `<p class="rating"><span class="rating-stars" aria-hidden="true">${starsText(bar.ratingSum / bar.ratingCount)}</span>
+        <strong>${decimal(bar.ratingSum / bar.ratingCount)}</strong>
+        <span class="muted">tapa · ${bar.ratingCount} ${bar.ratingCount === 1 ? 'valoración' : 'valoraciones'}</span></p>`
+    : '';
 
   const history = reports.map((r) => `
     <li data-report-id="${escapeHtml(r.id)}" data-own="${state.user?.uid === r.userId}">
       <div>
         <strong>${euros(r.price)}</strong> · ${r.hasTapa ? `tapa: ${escapeHtml(r.tapaType || 'sí')}` : 'sin tapa'}
+        ${r.tapaRating ? `<span class="rating-stars" title="${r.tapaRating} de 5">${starsText(r.tapaRating)}</span>` : ''}
         <br><span class="muted">${escapeHtml(nameOf(r.userId, r.username))} · ${date(r.createdAt)}</span>
       </div>
     </li>`).join('');
@@ -606,6 +698,7 @@ async function showBar(id) {
       media ${euros(bar.priceSum / bar.reportCount)} (${bar.reportCount} ${bar.reportCount === 1 ? 'opinión' : 'opiniones'})
     </p>
     ${tapa}
+    ${rating}
     <a class="btn block directions" href="${directionsUrl(bar)}" target="_blank" rel="noopener">Cómo llegar</a>
     <div class="section" data-photos hidden></div>
     <div class="section" data-update></div>

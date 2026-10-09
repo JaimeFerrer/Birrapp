@@ -177,14 +177,26 @@ export async function getMyBars(uid) {
   return snap.docs.map(read).sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis());
 }
 
-function cleanReport({ price, hasTapa, tapaType }) {
+function cleanReport({ price, hasTapa, tapaType, tapaRating }) {
   price = Math.round(Number(price) * 100) / 100;
   if (!Number.isFinite(price) || price <= 0 || price > 100) {
     throw userError('El precio debe ser un número entre 0 y 100');
   }
+  hasTapa = Boolean(hasTapa);
+  const rating = hasTapa ? Number(tapaRating) : null;
+  if (hasTapa && !(Number.isInteger(rating) && rating >= 1 && rating <= 5)) {
+    throw userError('Valora la tapa de 1 a 5 estrellas');
+  }
   const tapa = hasTapa ? String(tapaType ?? '').trim().slice(0, 100) : '';
-  return { price, hasTapa: Boolean(hasTapa), tapaType: tapa || null };
+  return { price, hasTapa, tapaType: tapa || null, tapaRating: rating };
 }
+
+// Lo que el bar copia de su último precio (la valoración va a la media).
+const latestFields = ({ price, hasTapa, tapaType }) => ({ price, hasTapa, tapaType });
+
+// Puntos y nº de valoraciones que aporta un precio a la media de la tapa.
+const ratingOf = (report) => report.tapaRating ?? 0;
+const ratedOf = (report) => (report.tapaRating == null ? 0 : 1);
 
 // ---------- Fotos ----------
 
@@ -263,10 +275,12 @@ export async function addBar(user, { name, address, lat, lng, photos = [], ...re
     createdBy: user.uid,
     createdByName: user.username,
     createdAt: serverTimestamp(),
-    ...r,
+    ...latestFields(r),
     priceUpdatedAt: serverTimestamp(),
     reportCount: 1,
     priceSum: r.price,
+    ratingSum: ratingOf(r),
+    ratingCount: ratedOf(r),
     lastReportId: reportRef.id,
   });
   batch.set(reportRef, { userId: user.uid, username: user.username, ...r, createdAt: serverTimestamp() });
@@ -285,10 +299,12 @@ export async function addReport(user, barId, { photos = [], ...report }) {
     const bar = (await tx.get(barRef)).data();
     tx.set(reportRef, { userId: user.uid, username: user.username, ...r, createdAt: serverTimestamp() });
     tx.update(barRef, {
-      ...r,
+      ...latestFields(r),
       priceUpdatedAt: serverTimestamp(),
       reportCount: bar.reportCount + 1,
       priceSum: bar.priceSum + r.price,
+      ratingSum: (bar.ratingSum ?? 0) + ratingOf(r),
+      ratingCount: (bar.ratingCount ?? 0) + ratedOf(r),
       lastReportId: reportRef.id,
     });
     for (const photo of photos) tx.set(doc(collection(barRef, 'photos')), photoDoc(user, photo));
@@ -336,15 +352,15 @@ export async function deleteReport(barId, reportId) {
     const changes = {
       reportCount: bar.reportCount - 1,
       priceSum: bar.priceSum - report.price,
+      ratingSum: (bar.ratingSum ?? 0) - ratingOf(report),
+      ratingCount: (bar.ratingCount ?? 0) - ratedOf(report),
       lastDeletedReportId: reportId,
     };
     if (bar.lastReportId === reportId) {
       if (!previous) throw userError('No se puede borrar el único precio del bar');
       const p = previous.data();
       Object.assign(changes, {
-        price: p.price,
-        hasTapa: p.hasTapa,
-        tapaType: p.tapaType,
+        ...latestFields(p),
         priceUpdatedAt: p.createdAt,
         lastReportId: previous.id,
       });
