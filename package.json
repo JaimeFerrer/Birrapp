@@ -2,16 +2,13 @@
   "name": "birrapp",
   "version": "1.0.0",
   "description": "Mapa colaborativo de bares con el precio de la cerveza y su tapa",
-  "main": "src/server.js",
   "scripts": {
     "dev": "vite",
     "dev:local": "VITE_EMULATORS=1 vite",
     "emulators": "firebase emulators:start --only auth,firestore --project demo-birrapp",
     "build": "vite build",
     "test": "firebase emulators:exec --only firestore --project demo-birrapp \"node --test test/rules.test.js\"",
-    "deploy": "npm run build && firebase deploy",
-    "start": "node src/server.js",
-    "test:legacy": "node --test test/api.test.js"
+    "deploy": "npm run build && firebase deploy"
   },
   "repository": {
     "type": "git",
@@ -25,13 +22,8 @@
   },
   "homepage": "https://github.com/JaimeFerrer/Birrapp#readme",
   "dependencies": {
-    "@libsql/client": "^0.15.15",
-    "express": "^4.22.3",
     "firebase": "^12.19.0",
     "leaflet": "^1.9.4"
-  },
-  "engines": {
-    "node": ">=20"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.2",

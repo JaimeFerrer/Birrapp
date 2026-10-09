@@ -35,15 +35,26 @@ service cloud.firestore {
         && report.tapaType == bar.tapaType;
     }
 
+    function validUsername(name) {
+      return name is string && name.matches('^[A-Za-z0-9_.-]{3,30}$');
+    }
+
     match /users/{userId} {
       allow read: if true;
       allow create: if signedIn() && request.auth.uid == userId
         && request.resource.data.keys().hasOnly(['username', 'createdAt'])
-        && request.resource.data.username is string
-        && request.resource.data.username.matches('^[A-Za-z0-9_.-]{3,30}$')
+        && validUsername(request.resource.data.username)
         && request.resource.data.createdAt == request.time
         && getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower())).data.uid == userId;
-      allow update, delete: if false;
+      // Cambio de nombre: el nombre nuevo queda reservado a tu nombre y el
+      // antiguo se libera en la misma operación.
+      allow update: if signedIn() && request.auth.uid == userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['username'])
+        && validUsername(request.resource.data.username)
+        && getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower())).data.uid == userId
+        && (resource.data.username.lower() == request.resource.data.username.lower()
+          || !existsAfter(/databases/$(database)/documents/usernames/$(resource.data.username.lower())));
+      allow delete: if false;
     }
 
     // Reserva de nombres para que no haya dos usuarios con el mismo.
@@ -53,7 +64,11 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['uid'])
         && request.resource.data.uid == request.auth.uid
         && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.username.lower() == name;
-      allow update, delete: if false;
+      // Solo se libera tu nombre antiguo al cambiarlo por otro.
+      allow delete: if signedIn()
+        && resource.data.uid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.username.lower() != name;
+      allow update: if false;
     }
 
     match /bars/{barId} {

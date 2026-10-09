@@ -154,3 +154,35 @@ test('fotos: solo JPEG, de tamaño razonable, a tu nombre y en bares que existen
   await assertFails(deleteDoc(first));
 });
 
+
+test('cambiar el nombre: reserva el nuevo, libera el antiguo y no pisa a nadie', async () => {
+  const ana = as('ana');
+  const luis = as('luis');
+  await registerProfile(ana, 'ana', 'ana');
+  await registerProfile(luis, 'luis', 'luis');
+  const rename = (db, uid, from, to, { freeOld = true } = {}) => {
+    const batch = writeBatch(db);
+    if (from.toLowerCase() !== to.toLowerCase()) {
+      batch.set(doc(db, 'usernames', to.toLowerCase()), { uid });
+      if (freeOld) batch.delete(doc(db, 'usernames', from.toLowerCase()));
+    }
+    batch.update(doc(db, 'users', uid), { username: to });
+    return batch.commit();
+  };
+
+  // Quedarse el nombre de otro, o cambiarlo sin liberar el antiguo.
+  await assertFails(rename(ana, 'ana', 'ana', 'luis'));
+  await assertFails(rename(ana, 'ana', 'ana', 'anita', { freeOld: false }));
+  // Nombre no válido.
+  await assertFails(rename(ana, 'ana', 'ana', 'a b'));
+  // Bien hecho, y el nombre antiguo queda libre para otro.
+  await assertSucceeds(rename(ana, 'ana', 'ana', 'anita'));
+  await assertSucceeds(rename(luis, 'luis', 'luis', 'ana'));
+  // Cambiar solo mayúsculas no necesita reservar otro nombre.
+  await assertSucceeds(rename(ana, 'ana', 'anita', 'Anita'));
+  // No se puede liberar el nombre de otro ni tocar su perfil.
+  await assertFails(deleteDoc(doc(ana, 'usernames', 'ana')));
+  await assertFails(updateDoc(doc(ana, 'users', 'luis'), { username: 'pepito' }));
+  // Ni cambiar otros campos del perfil.
+  await assertFails(updateDoc(doc(ana, 'users', 'ana'), { createdAt: serverTimestamp() }));
+});

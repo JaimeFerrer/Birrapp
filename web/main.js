@@ -5,8 +5,8 @@ import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 import './styles.css';
 import {
-  configured, watchUser, register, login, logout, sendPasswordReset, changeEmail,
-  watchBars, getBar, getMyBars, addBar, addReport, compressPhoto, getPhotos,
+  configured, watchUser, register, login, logout, sendPasswordReset, changeUsername, currentUsernames,
+  watchBars, getBar, getMyBars, addBar, addReport, addPhotos, compressPhoto, getPhotos,
 } from './firebase.js';
 
 // Con Vite las imágenes del marcador por defecto de Leaflet hay que indicarlas a mano.
@@ -209,25 +209,28 @@ function showAccount() {
   const { user } = state;
   const node = fragment(`
     <h2>Mi cuenta</h2>
-    <p class="account-name">${escapeHtml(user.username)}</p>
+
+    <div class="section">
+      <h3>Nombre de usuario</h3>
+      <div class="account-row" data-name-view>
+        <span class="account-name">${escapeHtml(user.username)}</span>
+        <button class="btn small" data-edit-name>Cambiar</button>
+      </div>
+      <form class="form" hidden>
+        <label>
+          <span class="sr-only">Nombre nuevo</span>
+          <input name="username" autocomplete="nickname" required minlength="3" maxlength="30"
+            pattern="[A-Za-z0-9_.\\-]+" title="Letras, números, punto, guion o guion bajo" value="${escapeHtml(user.username)}">
+        </label>
+        <p class="error"></p>
+        <button class="btn primary block">Guardar nombre</button>
+        <button type="button" class="btn block" data-cancel-name>Cancelar</button>
+      </form>
+    </div>
 
     <div class="section">
       <h3>Correo electrónico</h3>
-      <div class="account-row" data-email-view>
-        <span class="account-email">${escapeHtml(user.email)}</span>
-        <button class="btn small" data-edit-email>Cambiar</button>
-      </div>
-      <form class="form" hidden>
-        <label>Correo nuevo
-          <input name="email" type="email" autocomplete="email" inputmode="email" required>
-        </label>
-        <label>Tu contraseña actual
-          <input name="password" type="password" autocomplete="current-password" required>
-        </label>
-        <p class="error"></p>
-        <button class="btn primary block">Cambiar correo</button>
-        <button type="button" class="btn block" data-cancel-email>Cancelar</button>
-      </form>
+      <p class="account-email">${escapeHtml(user.email)}</p>
     </div>
 
     <div class="section">
@@ -241,23 +244,23 @@ function showAccount() {
   `);
 
   const form = $('form', node);
-  const emailView = $('[data-email-view]', node);
-  $('[data-edit-email]', node).addEventListener('click', () => {
-    emailView.hidden = true;
+  const nameView = $('[data-name-view]', node);
+  $('[data-edit-name]', node).addEventListener('click', () => {
+    nameView.hidden = true;
     form.hidden = false;
-    $('input', form).focus();
+    $('input', form).select();
   });
-  $('[data-cancel-email]', node).addEventListener('click', () => {
+  $('[data-cancel-name]', node).addEventListener('click', () => {
     form.hidden = true;
-    emailView.hidden = false;
+    nameView.hidden = false;
   });
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     submitting(form, async () => {
-      const data = Object.fromEntries(new FormData(form));
-      await changeEmail(data);
-      form.replaceWith(fragment(`<p>Te hemos enviado un correo a <strong>${escapeHtml(data.email)}</strong>.
-        El cambio se hará cuando pulses el enlace de ese correo.</p>`));
+      const username = new FormData(form).get('username');
+      await changeUsername(state.user, username);
+      setUser({ ...state.user, username: username.trim() });
+      showAccount();
     });
   });
 
@@ -354,13 +357,15 @@ const PHOTO_KINDS = { beer: 'Cerveza', tapa: 'Tapa' };
 
 // Botones para elegir (o hacer) la foto de la cerveza y de la tapa. Cada foto se
 // comprime en cuanto se elige; `getPhotos()` espera a que estén listas.
-function photoPickers(form) {
+// Con `linkTapa`, el hueco de la tapa solo aparece si en el formulario se marca
+// que ponen tapa.
+function photoPickers(form, { linkTapa = true, legend = 'Fotos (opcional)' } = {}) {
   const node = fragment(`
     <fieldset class="photos">
-      <legend>Fotos (opcional)</legend>
+      ${legend ? `<legend>${legend}</legend>` : ''}
       <div class="photo-pickers">
         ${Object.entries(PHOTO_KINDS).map(([kind, label]) => `
-          <div class="photo-picker" data-kind="${kind}" ${kind === 'tapa' ? 'hidden' : ''}>
+          <div class="photo-picker" data-kind="${kind}" ${linkTapa && kind === 'tapa' ? 'hidden' : ''}>
             <label class="photo-slot">
               <input type="file" accept="image/*" hidden>
               <span class="photo-placeholder">+ ${label}</span>
@@ -404,12 +409,13 @@ function photoPickers(form) {
     $('.photo-remove', picker).addEventListener('click', () => clear(picker));
   });
 
-  // La foto de la tapa solo tiene sentido si ponen tapa.
-  const tapaPicker = $('[data-kind="tapa"]', node);
-  form.querySelectorAll('input[name="has_tapa"]').forEach((radio) => radio.addEventListener('change', () => {
-    tapaPicker.hidden = radio.value !== 'yes';
-    if (tapaPicker.hidden) clear(tapaPicker);
-  }));
+  if (linkTapa) {
+    const tapaPicker = $('[data-kind="tapa"]', node);
+    form.querySelectorAll('input[name="has_tapa"]').forEach((radio) => radio.addEventListener('change', () => {
+      tapaPicker.hidden = radio.value !== 'yes';
+      if (tapaPicker.hidden) clear(tapaPicker);
+    }));
+  }
 
   return {
     node,
@@ -466,6 +472,8 @@ function showPhoto(src) {
   document.body.append(viewer);
 }
 
+// Sección de fotos del bar: galería y, con sesión, botón para subir fotos sin
+// tener que actualizar el precio.
 async function loadBarPhotos(barId, box) {
   let photos;
   try {
@@ -473,17 +481,51 @@ async function loadBarPhotos(barId, box) {
   } catch {
     return;
   }
-  if (!photos.length) return;
+  if (!photos.length && !state.user) return;
+  const nameOf = await currentUsernames(photos.map((p) => p.userId));
   box.hidden = false;
-  box.append(fragment(`<h3>Fotos</h3><div class="photo-gallery">${photos.map((p) => `
-    <figure>
-      <button type="button" class="photo-thumb"><img src="${p.data}" alt="Foto de ${PHOTO_KINDS[p.kind]?.toLowerCase()}" loading="lazy"></button>
-      <figcaption class="muted">${PHOTO_KINDS[p.kind] ?? ''} · ${escapeHtml(p.username)}</figcaption>
-    </figure>`).join('')}</div>`));
+  box.replaceChildren(fragment(`
+    <div class="section-head">
+      <h3>Fotos</h3>
+      ${state.user ? '<button type="button" class="btn small" data-add-photos>Añadir fotos</button>' : ''}
+    </div>
+    ${photos.length ? `<div class="photo-gallery">${photos.map((p) => `
+      <figure>
+        <button type="button" class="photo-thumb"><img src="${p.data}" alt="Foto de ${PHOTO_KINDS[p.kind]?.toLowerCase()}" loading="lazy"></button>
+        <figcaption class="muted">${PHOTO_KINDS[p.kind] ?? ''} · ${escapeHtml(nameOf(p.userId, p.username))}</figcaption>
+      </figure>`).join('')}</div>` : '<p class="muted">Todavía no hay fotos. ¡Sube la primera!</p>'}
+    <form class="form" data-photo-form hidden>
+      <div data-pickers></div>
+      <p class="error"></p>
+      <button class="btn primary block">Subir fotos</button>
+      <button type="button" class="btn block" data-cancel-photos>Cancelar</button>
+    </form>
+  `));
   box.querySelectorAll('.photo-thumb img').forEach((img) => img.parentElement.addEventListener('click', () => showPhoto(img.src)));
+
+  const addButton = $('[data-add-photos]', box);
+  if (!addButton) return;
+  const form = $('[data-photo-form]', box);
+  const pickers = photoPickers(form, { linkTapa: false, legend: '' });
+  $('[data-pickers]', form).replaceWith(pickers.node);
+  addButton.addEventListener('click', () => {
+    form.hidden = false;
+    addButton.hidden = true;
+  });
+  $('[data-cancel-photos]', form).addEventListener('click', () => loadBarPhotos(barId, box));
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    submitting(form, async () => {
+      await addPhotos(state.user, barId, await pickers.getPhotos());
+      await loadBarPhotos(barId, box);
+    });
+  });
 }
 
 // ---------- Detalle de bar ----------
+
+// Abre Google Maps (la app en el móvil) con la ruta andando hasta el bar.
+const directionsUrl = (bar) => `https://www.google.com/maps/dir/?api=1&destination=${bar.lat.toFixed(6)},${bar.lng.toFixed(6)}&travelmode=walking`;
 
 async function showBar(id) {
   stopPlacing();
@@ -497,6 +539,7 @@ async function showBar(id) {
   if (!result) return;
   const { bar, reports } = result;
   upsertMarker(bar);
+  const nameOf = await currentUsernames([bar.createdBy, ...reports.map((r) => r.userId)]);
 
   const tapa = bar.hasTapa
     ? `<span class="badge yes">🍢 Tapa: ${escapeHtml(bar.tapaType || 'sí')}</span>`
@@ -505,7 +548,7 @@ async function showBar(id) {
   const history = reports.map((r) => `
     <li>
       <strong>${euros(r.price)}</strong> · ${r.hasTapa ? `tapa: ${escapeHtml(r.tapaType || 'sí')}` : 'sin tapa'}
-      <br><span class="muted">${escapeHtml(r.username)} · ${date(r.createdAt)}</span>
+      <br><span class="muted">${escapeHtml(nameOf(r.userId, r.username))} · ${date(r.createdAt)}</span>
     </li>`).join('');
 
   const node = fragment(`
@@ -517,12 +560,13 @@ async function showBar(id) {
       media ${euros(bar.priceSum / bar.reportCount)} (${bar.reportCount} ${bar.reportCount === 1 ? 'opinión' : 'opiniones'})
     </p>
     ${tapa}
+    <a class="btn block directions" href="${directionsUrl(bar)}" target="_blank" rel="noopener">Cómo llegar</a>
     <div class="section" data-photos hidden></div>
     <div class="section" data-update></div>
     <div class="section">
       <h3>Historial</h3>
       <ul class="history">${history}</ul>
-      <p class="muted">Añadido por ${escapeHtml(bar.createdByName)}</p>
+      <p class="muted">Añadido por ${escapeHtml(nameOf(bar.createdBy, bar.createdByName))}</p>
     </div>
   `);
 
@@ -534,21 +578,24 @@ async function showBar(id) {
       <h3>¿Has estado? Actualiza el precio</h3>
       <form class="form">
         <div data-report></div>
+        <div data-pickers></div>
         <p class="error"></p>
         <button class="btn primary">Actualizar</button>
       </form>
     `));
-    $('[data-report]', update).replaceWith(reportFields());
     const form = $('form', update);
+    $('[data-report]', update).replaceWith(reportFields());
+    const pickers = photoPickers(form);
+    $('[data-pickers]', update).replaceWith(pickers.node);
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       submitting(form, async () => {
-        await addReport(state.user, id, readReport(form));
+        await addReport(state.user, id, { ...readReport(form), photos: await pickers.getPhotos() });
         await showBar(id);
       });
     });
   } else {
-    update.append(fragment('<p class="muted"><a href="#" class="link" data-login>Entra</a> para actualizar el precio.</p>'));
+    update.append(fragment('<p class="muted"><a href="#" class="link" data-login>Entra</a> para actualizar el precio o subir fotos.</p>'));
     $('[data-login]', update).addEventListener('click', (e) => { e.preventDefault(); showAuth('login'); });
   }
 

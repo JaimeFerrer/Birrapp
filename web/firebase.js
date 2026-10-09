@@ -2,7 +2,6 @@ import { initializeApp } from 'firebase/app';
 import {
   getAuth, connectAuthEmulator, onAuthStateChanged, createUserWithEmailAndPassword,
   signInWithEmailAndPassword, signOut, sendPasswordResetEmail, deleteUser,
-  EmailAuthProvider, reauthenticateWithCredential, verifyBeforeUpdateEmail,
 } from 'firebase/auth';
 import {
   getFirestore, connectFirestoreEmulator, collection, doc, getDoc, getDocs, onSnapshot,
@@ -80,6 +79,7 @@ export function watchUser(callback) {
       return;
     }
     stopProfile = onSnapshot(doc(db, 'users', firebaseUser.uid), (snap) => {
+      usernameCache.set(firebaseUser.uid, snap.data()?.username ?? null);
       callback({ uid: firebaseUser.uid, email: firebaseUser.email, username: snap.data()?.username ?? null });
     });
   });
@@ -119,11 +119,42 @@ export const logout = () => signOut(auth);
 
 export const sendPasswordReset = (email) => friendly(sendPasswordResetEmail(auth, String(email).trim()));
 
-// Firebase manda un correo a la dirección nueva y la cambia cuando se confirma.
-export async function changeEmail({ email, password }) {
-  const user = auth.currentUser;
-  await friendly(reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, password)));
-  await friendly(verifyBeforeUpdateEmail(user, String(email).trim()));
+// Cambia el nombre visible: reserva el nuevo y libera el antiguo a la vez.
+export async function changeUsername(user, newName) {
+  newName = String(newName).trim();
+  if (!USERNAME_RE.test(newName)) {
+    throw userError('El nombre debe tener 3-30 caracteres (letras, números, . _ -)');
+  }
+  if (newName === user.username) return;
+  const oldKey = user.username.toLowerCase();
+  const newKey = newName.toLowerCase();
+  const batch = writeBatch(db);
+  if (newKey !== oldKey) {
+    const newRef = doc(db, 'usernames', newKey);
+    if ((await friendly(getDoc(newRef))).exists()) {
+      throw userError('Ese nombre ya está cogido, prueba con otro');
+    }
+    batch.set(newRef, { uid: user.uid });
+    batch.delete(doc(db, 'usernames', oldKey));
+  }
+  batch.update(doc(db, 'users', user.uid), { username: newName });
+  try {
+    await batch.commit();
+  } catch (err) {
+    throw err.code === 'permission-denied' ? userError('Ese nombre ya está cogido, prueba con otro') : friendlyError(err);
+  }
+}
+
+// Nombre actual de cada usuario (los bares, precios y fotos guardan el nombre
+// que tenía al crearlos; así se muestra el de ahora si lo ha cambiado).
+const usernameCache = new Map();
+export async function currentUsernames(uids) {
+  const missing = [...new Set(uids)].filter((uid) => uid && !usernameCache.has(uid));
+  await Promise.all(missing.map(async (uid) => {
+    const snap = await getDoc(doc(db, 'users', uid)).catch(() => null);
+    usernameCache.set(uid, snap?.data()?.username ?? null);
+  }));
+  return (uid, fallback) => usernameCache.get(uid) || fallback;
 }
 
 // ---------- Bares ----------
@@ -196,6 +227,18 @@ export async function compressPhoto(file) {
   }
 }
 
+function photoDoc(user, photo) {
+  return { kind: photo.kind, data: photo.data, userId: user.uid, username: user.username, createdAt: serverTimestamp() };
+}
+
+// Sube fotos a un bar sin tocar el precio.
+export async function addPhotos(user, barId, photos) {
+  if (!photos.length) throw userError('Elige al menos una foto');
+  const batch = writeBatch(db);
+  for (const photo of photos) batch.set(doc(collection(db, 'bars', barId, 'photos')), photoDoc(user, photo));
+  await friendly(batch.commit());
+}
+
 export async function getPhotos(barId) {
   const snap = await friendly(getDocs(query(collection(db, 'bars', barId, 'photos'), orderBy('createdAt', 'desc'), limit(12))));
   // Las más nuevas primero y, de las subidas a la vez, la cerveza antes que la tapa.
@@ -227,17 +270,14 @@ export async function addBar(user, { name, address, lat, lng, photos = [], ...re
     lastReportId: reportRef.id,
   });
   batch.set(reportRef, { userId: user.uid, username: user.username, ...r, createdAt: serverTimestamp() });
-  for (const photo of photos) {
-    batch.set(doc(collection(barRef, 'photos')), {
-      kind: photo.kind, data: photo.data, userId: user.uid, username: user.username, createdAt: serverTimestamp(),
-    });
-  }
+  for (const photo of photos) batch.set(doc(collection(barRef, 'photos')), photoDoc(user, photo));
   await friendly(batch.commit());
   return barRef.id;
 }
 
-// Añade un precio nuevo y actualiza el resumen del bar en la misma transacción.
-export async function addReport(user, barId, report) {
+// Añade un precio nuevo (y sus fotos, si hay) y actualiza el resumen del bar
+// en la misma transacción.
+export async function addReport(user, barId, { photos = [], ...report }) {
   const r = cleanReport(report);
   const barRef = doc(db, 'bars', barId);
   const reportRef = doc(collection(barRef, 'reports'));
@@ -251,6 +291,7 @@ export async function addReport(user, barId, report) {
       priceSum: bar.priceSum + r.price,
       lastReportId: reportRef.id,
     });
+    for (const photo of photos) tx.set(doc(collection(barRef, 'photos')), photoDoc(user, photo));
   }));
 }
 

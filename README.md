@@ -86,17 +86,14 @@ npm test     # reglas de seguridad de Firestore contra el emulador (necesita Jav
 ### Modelo de datos (Firestore)
 
 - `users/{uid}`: `{ username, createdAt }`. El correo solo lo guarda Authentication.
+  El nombre se puede cambiar desde «Mi cuenta»; los bares, precios y fotos
+  muestran siempre el nombre actual de quien los subió.
 - `usernames/{nombre en minúsculas}`: `{ uid }`, para que no haya nombres repetidos.
 - `bars/{id}`: datos del bar y resumen del último precio (`price`, `hasTapa`,
   `tapaType`, `reportCount`, `priceSum`, `lastReportId`…), para pintar el mapa
   con una sola lectura.
 - `bars/{id}/reports/{id}`: cada precio que deja un usuario.
-- `bars/{id}/photos/{id}`: fotos de la cerveza o la tapa (`kind`), comprimidas
+- `bars/{id}/photos/{id}`: fotos de la cerveza o la tapa (`kind`), subidas al
+  crear el bar, al actualizar el precio o sueltas desde su ficha, comprimidas
   en el móvil a JPEG de unos cientos de KB y guardadas en base64 (`data`).
   Firebase Storage exige el plan de pago, y así cabe todo en el gratuito.
-
-## Versión anterior (temporal)
-
-La primera versión (servidor Node en Render con base de datos en Turso) sigue
-en `src/`, `public/` y `render.yaml` hasta que se dé de baja Render. Sus tests
-se lanzan con `npm run test:legacy`. Sus datos no se pasan a Firebase.

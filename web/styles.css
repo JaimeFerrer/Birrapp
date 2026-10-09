@@ -38,7 +38,14 @@ body { display: flex; flex-direction: column; }
   color: var(--text);
   text-decoration: none;
 }
+.brand { gap: 8px; }
 .brand-logo { height: 52px; width: auto; display: block; }
+.brand-name {
+  font-size: 1.6rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  line-height: 1;
+}
 
 #map { flex: 1; }
 
@@ -159,6 +166,12 @@ body { display: flex; flex-direction: column; }
 
 .section { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
 .section h3 { margin: 0 0 8px; font-size: 1rem; }
+
+/* Ficha del bar */
+.directions { display: block; margin-top: 12px; text-align: center; text-decoration: none; font-weight: 600; }
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.section-head h3 { margin: 0; }
+.section [data-photo-form] { margin-top: 12px; }
 
 /* Fotos */
 .photos { border: 1px solid var(--border); border-radius: 6px; }
