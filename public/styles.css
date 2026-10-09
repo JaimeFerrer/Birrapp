@@ -1,0 +1,141 @@
+:root {
+  --amber: #f5a623;
+  --amber-dark: #c77d00;
+  --green: #2e9d5b;
+  --gray: #6b7280;
+  --bg: #fffdf7;
+  --text: #1f2937;
+  --border: #e5e7eb;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--text);
+}
+
+* { box-sizing: border-box; }
+
+[hidden] { display: none !important; }
+
+html, body { height: 100%; margin: 0; background: var(--bg); }
+
+body { display: flex; flex-direction: column; }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--amber);
+  box-shadow: 0 2px 4px rgb(0 0 0 / 0.15);
+  z-index: 1000;
+}
+.topbar h1 { margin: 0; font-size: 1.3rem; }
+.topbar-actions { display: flex; align-items: center; gap: 8px; }
+.user-name { font-weight: 600; }
+
+#map { flex: 1; }
+
+.btn {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+.btn.primary { background: var(--text); color: #fff; border-color: var(--text); }
+.btn.small { padding: 4px 8px; font-size: 0.85rem; }
+.btn:disabled { opacity: 0.6; cursor: default; }
+
+.hint {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #fff;
+  border-radius: 8px;
+  padding: 8px 12px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.2);
+  z-index: 1000;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  max-width: calc(100% - 32px);
+  flex-wrap: wrap;
+}
+
+.panel {
+  position: fixed;
+  top: 64px;
+  right: 16px;
+  width: 360px;
+  max-width: calc(100% - 32px);
+  max-height: calc(100% - 80px);
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.25);
+  z-index: 1000;
+}
+.panel h2 { margin: 0 32px 8px 0; }
+.panel-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border: none;
+  background: none;
+  font-size: 1.6rem;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.form { display: flex; flex-direction: column; gap: 12px; }
+.form label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; }
+.form label.inline { flex-direction: row; align-items: center; display: inline-flex; margin-right: 16px; }
+.form input:not([type="radio"]) {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+}
+.tapa { border: 1px solid var(--border); border-radius: 6px; }
+
+.error { color: #b91c1c; margin: 0; min-height: 1em; font-size: 0.9rem; }
+.muted { color: var(--gray); font-size: 0.85rem; }
+
+.price-big { font-size: 2rem; font-weight: 700; margin: 4px 0; }
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  background: #f3f4f6;
+}
+.badge.yes { background: #dcfce7; color: #166534; }
+
+.history { list-style: none; padding: 0; margin: 8px 0 0; font-size: 0.85rem; }
+.history li { padding: 6px 0; border-top: 1px solid var(--border); }
+
+.section { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+.section h3 { margin: 0 0 8px; font-size: 1rem; }
+
+/* Marcador del mapa con el precio */
+.price-marker {
+  background: var(--amber);
+  border: 2px solid var(--amber-dark);
+  border-radius: 8px;
+  padding: 2px 6px;
+  font-weight: 700;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+  transform: translate(-50%, -100%);
+  display: inline-block;
+}
+.price-marker.tapa { background: #bbf7d0; border-color: var(--green); }
+.marker-wrap { background: none; border: none; }
+
+@media (max-width: 600px) {
+  .panel { top: auto; bottom: 0; right: 0; left: 0; width: 100%; max-width: 100%; max-height: 70%; border-radius: 12px 12px 0 0; }
+  .topbar h1 { font-size: 1.1rem; }
+}

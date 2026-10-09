@@ -1,0 +1,28 @@
+{
+  "name": "birrapp",
+  "version": "1.0.0",
+  "description": "Mapa colaborativo de bares con el precio de la cerveza y su tapa",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.js",
+    "test": "node --disable-warning=ExperimentalWarning --test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JaimeFerrer/Birrapp.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/JaimeFerrer/Birrapp/issues"
+  },
+  "homepage": "https://github.com/JaimeFerrer/Birrapp#readme",
+  "dependencies": {
+    "express": "^4.22.3",
+    "leaflet": "^1.9.4"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

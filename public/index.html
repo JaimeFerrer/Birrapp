@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Birrapp</title>
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>🍺 Birrapp</h1>
+    <div class="topbar-actions">
+      <button id="add-bar-btn" class="btn primary" hidden>+ Añadir bar</button>
+      <span id="user-name" class="user-name" hidden></span>
+      <button id="logout-btn" class="btn" hidden>Salir</button>
+      <button id="login-btn" class="btn primary">Entrar</button>
+    </div>
+  </header>
+
+  <main id="map"></main>
+
+  <div id="placing-hint" class="hint" hidden>
+    Toca el mapa donde está el bar
+    <button id="locate-btn" class="btn small">📍 Mi ubicación</button>
+    <button id="cancel-place-btn" class="btn small">Cancelar</button>
+  </div>
+
+  <aside id="panel" class="panel" hidden>
+    <button id="panel-close" class="panel-close" aria-label="Cerrar">×</button>
+    <div id="panel-body"></div>
+  </aside>
+
+  <template id="auth-template">
+    <h2 data-title>Entrar</h2>
+    <form class="form" data-form>
+      <label>Usuario <input name="username" autocomplete="username" required minlength="3" maxlength="30"></label>
+      <label>Contraseña <input name="password" type="password" autocomplete="current-password" required minlength="6"></label>
+      <p class="error" data-error></p>
+      <button class="btn primary" data-submit>Entrar</button>
+    </form>
+    <p class="muted">
+      <span data-switch-text>¿No tienes cuenta?</span>
+      <a href="#" data-switch>Crear usuario</a>
+    </p>
+  </template>
+
+  <template id="report-fields-template">
+    <label>Precio de la cerveza (€)
+      <input name="price" type="number" step="0.05" min="0.05" max="100" required>
+    </label>
+    <fieldset class="tapa">
+      <legend>¿Ponen tapa?</legend>
+      <label class="inline"><input type="radio" name="has_tapa" value="yes" required> Sí</label>
+      <label class="inline"><input type="radio" name="has_tapa" value="no"> No</label>
+    </fieldset>
+    <label data-tapa-type hidden>Tipo de tapa
+      <input name="tapa_type" maxlength="100" placeholder="Aceitunas, patatas bravas, montadito…">
+    </label>
+  </template>
+
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
