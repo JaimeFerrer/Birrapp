@@ -7,6 +7,7 @@ import './styles.css';
 import {
   configured, watchUser, register, login, logout, sendPasswordReset, changeUsername, currentUsernames,
   watchBars, getBar, getMyBars, addBar, addReport, addPhotos, compressPhoto, getPhotos,
+  deleteBar, deleteReport, deletePhoto,
 } from './firebase.js';
 
 // Con Vite las imágenes del marcador por defecto de Leaflet hay que indicarlas a mano.
@@ -119,6 +120,43 @@ async function submitting(form, fn) {
   } finally {
     button.disabled = false;
   }
+}
+
+// Aviso breve abajo de la pantalla (errores al borrar, etc.).
+function toast(message) {
+  const el = fragment(`<div class="toast" role="status">${escapeHtml(message)}</div>`).firstElementChild;
+  document.body.append(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+// Botón de borrar en dos toques: el primero pide confirmación y el segundo
+// borra. Si no se confirma en unos segundos, vuelve a su estado normal.
+function deleteButton(label, confirmLabel, action) {
+  const button = fragment(`<button type="button" class="btn small danger">${label}</button>`).firstElementChild;
+  let timer = null;
+  button.addEventListener('click', async () => {
+    if (!button.classList.contains('armed')) {
+      button.classList.add('armed');
+      button.textContent = confirmLabel;
+      timer = setTimeout(() => {
+        button.classList.remove('armed');
+        button.textContent = label;
+      }, 4000);
+      return;
+    }
+    clearTimeout(timer);
+    button.disabled = true;
+    button.textContent = 'Borrando…';
+    try {
+      await action();
+    } catch (err) {
+      toast(err.message);
+      button.disabled = false;
+      button.classList.remove('armed');
+      button.textContent = label;
+    }
+  });
+  return button;
 }
 
 // ---------- Usuarios ----------
@@ -490,7 +528,7 @@ async function loadBarPhotos(barId, box) {
       ${state.user ? '<button type="button" class="btn small" data-add-photos>Añadir fotos</button>' : ''}
     </div>
     ${photos.length ? `<div class="photo-gallery">${photos.map((p) => `
-      <figure>
+      <figure data-photo-id="${escapeHtml(p.id)}" data-own="${state.user?.uid === p.userId}">
         <button type="button" class="photo-thumb"><img src="${p.data}" alt="Foto de ${PHOTO_KINDS[p.kind]?.toLowerCase()}" loading="lazy"></button>
         <figcaption class="muted">${PHOTO_KINDS[p.kind] ?? ''} · ${escapeHtml(nameOf(p.userId, p.username))}</figcaption>
       </figure>`).join('')}</div>` : '<p class="muted">Todavía no hay fotos. ¡Sube la primera!</p>'}
@@ -502,6 +540,12 @@ async function loadBarPhotos(barId, box) {
     </form>
   `));
   box.querySelectorAll('.photo-thumb img').forEach((img) => img.parentElement.addEventListener('click', () => showPhoto(img.src)));
+  box.querySelectorAll('figure[data-own="true"]').forEach((figure) => {
+    figure.append(deleteButton('Borrar', '¿Borrar?', async () => {
+      await deletePhoto(barId, figure.dataset.photoId);
+      await loadBarPhotos(barId, box);
+    }));
+  });
 
   const addButton = $('[data-add-photos]', box);
   if (!addButton) return;
@@ -546,9 +590,11 @@ async function showBar(id) {
     : '<span class="badge">Sin tapa</span>';
 
   const history = reports.map((r) => `
-    <li>
-      <strong>${euros(r.price)}</strong> · ${r.hasTapa ? `tapa: ${escapeHtml(r.tapaType || 'sí')}` : 'sin tapa'}
-      <br><span class="muted">${escapeHtml(nameOf(r.userId, r.username))} · ${date(r.createdAt)}</span>
+    <li data-report-id="${escapeHtml(r.id)}" data-own="${state.user?.uid === r.userId}">
+      <div>
+        <strong>${euros(r.price)}</strong> · ${r.hasTapa ? `tapa: ${escapeHtml(r.tapaType || 'sí')}` : 'sin tapa'}
+        <br><span class="muted">${escapeHtml(nameOf(r.userId, r.username))} · ${date(r.createdAt)}</span>
+      </div>
     </li>`).join('');
 
   const node = fragment(`
@@ -568,7 +614,32 @@ async function showBar(id) {
       <ul class="history">${history}</ul>
       <p class="muted">Añadido por ${escapeHtml(nameOf(bar.createdBy, bar.createdByName))}</p>
     </div>
+    <div class="section" data-owner hidden>
+      <h3>Tu bar</h3>
+      <p class="muted">Si lo borras, se borran también todos sus precios y fotos.</p>
+    </div>
   `);
+
+  // Cada uno puede borrar sus precios (menos el único que tenga el bar).
+  if (bar.reportCount > 1) {
+    node.querySelectorAll('.history li[data-own="true"]').forEach((li) => {
+      li.append(deleteButton('Borrar', '¿Borrar?', async () => {
+        await deleteReport(id, li.dataset.reportId);
+        await showBar(id);
+      }));
+    });
+  }
+
+  // Quien creó el bar puede borrarlo entero.
+  if (state.user?.uid === bar.createdBy) {
+    const owner = $('[data-owner]', node);
+    owner.hidden = false;
+    owner.append(deleteButton('Borrar bar', 'Toca otra vez para borrar el bar', async () => {
+      await deleteBar(id);
+      closePanel();
+      toast(`«${bar.name}» borrado`);
+    }));
+  }
 
   loadBarPhotos(id, $('[data-photos]', node));
 
@@ -615,5 +686,14 @@ if (!configured) {
 } else {
   watchUser(setUser);
   // Los bares se actualizan solos cuando alguien añade uno o cambia un precio.
-  watchBars((bars) => bars.forEach(upsertMarker), (err) => console.error(err));
+  watchBars((bars) => {
+    const ids = new Set(bars.map((bar) => bar.id));
+    for (const [id, marker] of state.markers) {
+      if (!ids.has(id)) {
+        marker.remove();
+        state.markers.delete(id);
+      }
+    }
+    bars.forEach(upsertMarker);
+  }, (err) => console.error(err));
 }

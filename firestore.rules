@@ -74,12 +74,29 @@ service cloud.firestore {
     match /bars/{barId} {
       allow read: if true;
       allow create: if signedIn() && validNewBar();
-      allow update: if signedIn() && validBarUpdate();
-      allow delete: if false;
+      allow update: if signedIn() && (validReportAdded() || validReportRemoved());
+      // Solo quien creó el bar puede borrarlo (la app borra también sus
+      // precios y fotos en la misma operación).
+      allow delete: if signedIn() && resource.data.createdBy == request.auth.uid;
+
+      function barPath() {
+        return /databases/$(database)/documents/bars/$(barId);
+      }
+
+      function reportPath(id) {
+        return /databases/$(database)/documents/bars/$(barId)/reports/$(id);
+      }
+
+      // Al borrar el bar, sus precios y fotos se pueden borrar con él. Si
+      // quedara alguno suelto de un bar que ya no existe, se puede limpiar.
+      function barBeingDeleted() {
+        return signedIn() && !existsAfter(barPath())
+          && (!exists(barPath()) || get(barPath()).data.createdBy == request.auth.uid);
+      }
 
       function validNewBar() {
         let d = request.resource.data;
-        let report = getAfter(/databases/$(database)/documents/bars/$(barId)/reports/$(d.lastReportId)).data;
+        let report = getAfter(reportPath(d.lastReportId)).data;
         return d.keys().hasOnly(['name', 'address', 'lat', 'lng', 'createdBy', 'createdByName', 'createdAt',
             'price', 'hasTapa', 'tapaType', 'priceUpdatedAt', 'reportCount', 'priceSum', 'lastReportId'])
           && d.name is string && d.name.size() > 0 && d.name.size() <= 100
@@ -96,14 +113,15 @@ service cloud.firestore {
           && matchesReport(d, report);
       }
 
-      function validBarUpdate() {
+      // Precio nuevo: el resumen pasa a ser el de ese precio.
+      function validReportAdded() {
         let d = request.resource.data;
         let old = resource.data;
-        let report = getAfter(/databases/$(database)/documents/bars/$(barId)/reports/$(d.lastReportId)).data;
+        let report = getAfter(reportPath(d.lastReportId)).data;
         return d.diff(old).affectedKeys()
             .hasOnly(['price', 'hasTapa', 'tapaType', 'priceUpdatedAt', 'reportCount', 'priceSum', 'lastReportId'])
           && d.lastReportId != old.lastReportId
-          && !exists(/databases/$(database)/documents/bars/$(barId)/reports/$(d.lastReportId))
+          && !exists(reportPath(d.lastReportId))
           && d.reportCount == old.reportCount + 1
           && d.priceSum == old.priceSum + d.price
           && d.priceUpdatedAt == request.time
@@ -111,11 +129,38 @@ service cloud.firestore {
           && matchesReport(d, report);
       }
 
+      // Precio borrado por quien lo puso (`lastDeletedReportId`): se resta del
+      // resumen y, si era el último, el resumen pasa al precio anterior.
+      function validReportRemoved() {
+        let d = request.resource.data;
+        let old = resource.data;
+        let removed = get(reportPath(d.lastDeletedReportId)).data;
+        let wasLatest = old.lastReportId == d.lastDeletedReportId;
+        let latest = getAfter(reportPath(d.lastReportId)).data;
+        return d.diff(old).affectedKeys().hasOnly(['price', 'hasTapa', 'tapaType', 'priceUpdatedAt',
+            'reportCount', 'priceSum', 'lastReportId', 'lastDeletedReportId'])
+          && d.lastDeletedReportId != old.get('lastDeletedReportId', null)
+          && exists(reportPath(d.lastDeletedReportId))
+          && !existsAfter(reportPath(d.lastDeletedReportId))
+          && removed.userId == request.auth.uid
+          && d.reportCount == old.reportCount - 1
+          && d.reportCount >= 1
+          && d.priceSum == old.priceSum - removed.price
+          && (wasLatest
+            ? (d.lastReportId != old.lastReportId
+              && existsAfter(reportPath(d.lastReportId))
+              && matchesReport(d, latest)
+              && d.priceUpdatedAt == latest.createdAt)
+            : (d.lastReportId == old.lastReportId
+              && d.price == old.price && d.hasTapa == old.hasTapa
+              && d.tapaType == old.tapaType && d.priceUpdatedAt == old.priceUpdatedAt));
+      }
+
       // Fotos de la cerveza y de la tapa, comprimidas como JPEG en base64.
       match /photos/{photoId} {
         allow read: if true;
         allow create: if signedIn()
-          && existsAfter(/databases/$(database)/documents/bars/$(barId))
+          && existsAfter(barPath())
           && request.resource.data.keys().hasOnly(['kind', 'data', 'userId', 'username', 'createdAt'])
           && request.resource.data.kind in ['beer', 'tapa']
           && request.resource.data.data is string
@@ -124,13 +169,20 @@ service cloud.firestore {
           && request.resource.data.userId == request.auth.uid
           && request.resource.data.username == usernameOf(request.auth.uid)
           && request.resource.data.createdAt == request.time;
-        allow update, delete: if false;
+        // Cada uno puede borrar sus fotos; y todas, si borra su bar.
+        allow delete: if (signedIn() && resource.data.userId == request.auth.uid) || barBeingDeleted();
+        allow update: if false;
       }
 
       match /reports/{reportId} {
         allow read: if true;
         allow create: if signedIn() && validNewReport();
-        allow update, delete: if false;
+        // Cada uno puede borrar sus precios (actualizando el resumen del bar a
+        // la vez); y todos, si borra su bar.
+        allow delete: if (signedIn() && resource.data.userId == request.auth.uid
+            && getAfter(barPath()).data.lastDeletedReportId == reportId)
+          || barBeingDeleted();
+        allow update: if false;
 
         function validNewReport() {
           let d = request.resource.data;
@@ -140,7 +192,7 @@ service cloud.firestore {
             && validPrice(d.price)
             && validTapa(d)
             && d.createdAt == request.time
-            && getAfter(/databases/$(database)/documents/bars/$(barId)).data.lastReportId == reportId;
+            && getAfter(barPath()).data.lastReportId == reportId;
         }
       }
     }

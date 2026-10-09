@@ -7,7 +7,7 @@ const {
   initializeTestEnvironment, assertSucceeds, assertFails,
 } = require('@firebase/rules-unit-testing');
 const {
-  doc, setDoc, getDoc, updateDoc, deleteDoc, writeBatch, serverTimestamp, collection
+  doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, writeBatch, serverTimestamp, collection
 } = require('firebase/firestore');
 
 let env;
@@ -146,12 +146,12 @@ test('fotos: solo JPEG, de tamaño razonable, a tu nombre y en bares que existen
   await assertFails(setDoc(doc(photos), photo({ data: `data:image/jpeg;base64,${'A'.repeat(700000)}` })));
   await assertFails(setDoc(doc(photos), photo({ userId: 'luis' })));
   await assertFails(setDoc(doc(collection(ana, 'bars', 'no-existe', 'photos')), photo()));
-  // Se pueden ver sin sesión, pero no borrar ni cambiar.
+  // Se pueden ver sin sesión, pero no cambiar, y sin sesión tampoco borrar.
   const first = doc(photos, 'una');
   await setDoc(first, photo());
   await assertSucceeds(getDoc(doc(anon(), 'bars', barRef.id, 'photos', 'una')));
   await assertFails(updateDoc(first, { kind: 'tapa' }));
-  await assertFails(deleteDoc(first));
+  await assertFails(deleteDoc(doc(anon(), 'bars', barRef.id, 'photos', 'una')));
 });
 
 
@@ -185,4 +185,62 @@ test('cambiar el nombre: reserva el nuevo, libera el antiguo y no pisa a nadie',
   await assertFails(updateDoc(doc(ana, 'users', 'luis'), { username: 'pepito' }));
   // Ni cambiar otros campos del perfil.
   await assertFails(updateDoc(doc(ana, 'users', 'ana'), { createdAt: serverTimestamp() }));
+});
+
+test('borrar: el bar solo su creador; precios y fotos, cada uno los suyos', async () => {
+  const ana = as('ana');
+  const luis = as('luis');
+  await registerProfile(ana, 'ana', 'ana');
+  await registerProfile(luis, 'luis', 'luis');
+  const { barRef, commit } = newBar(ana, 'ana', 'ana');
+  await commit();
+  const anaReport = (await getDocs(collection(ana, 'bars', barRef.id, 'reports'))).docs[0];
+  const luisBar = doc(luis, 'bars', barRef.id);
+  await newReport(luis, 'luis', 'luis', luisBar, { reportCount: 1, priceSum: 2.5 });
+  const luisReport = (await getDocs(collection(luis, 'bars', barRef.id, 'reports'))).docs.find((d) => d.data().userId === 'luis');
+  const before = (await getDoc(luisBar)).data();
+
+  // Borrar un precio y dejar el resumen como estaba antes de él.
+  const removeReport = (db, reportId, barChanges) => {
+    const batch = writeBatch(db);
+    batch.delete(doc(db, 'bars', barRef.id, 'reports', reportId));
+    batch.update(doc(db, 'bars', barRef.id), { lastDeletedReportId: reportId, ...barChanges });
+    return batch.commit();
+  };
+  const backToAna = {
+    reportCount: 1, priceSum: 2.5, price: 2.5, hasTapa: true, tapaType: 'Bravas',
+    priceUpdatedAt: anaReport.data().createdAt, lastReportId: anaReport.id,
+  };
+  // El precio de otro, sin tocar el resumen o con el resumen mal.
+  await assertFails(removeReport(luis, anaReport.id, { reportCount: 1, priceSum: 3 }));
+  await assertFails(deleteDoc(doc(luis, 'bars', barRef.id, 'reports', luisReport.id)));
+  await assertFails(removeReport(luis, luisReport.id, { ...backToAna, priceSum: 99 }));
+  await assertFails(removeReport(luis, luisReport.id, { ...backToAna, price: 1 }));
+  // Bien hecho: el bar vuelve al precio de Ana.
+  await assertSucceeds(removeReport(luis, luisReport.id, backToAna));
+  const after = (await getDoc(luisBar)).data();
+  if (after.reportCount !== 1 || after.price !== 2.5 || before.reportCount !== 2) throw new Error('resumen incorrecto');
+  // El único precio del bar no se puede borrar.
+  await assertFails(removeReport(ana, anaReport.id, { reportCount: 0, priceSum: 0 }));
+
+  // Fotos: las tuyas sí, las de otros no.
+  const photo = (uid) => ({
+    kind: 'tapa', data: 'data:image/jpeg;base64,/9j/', userId: uid, username: uid, createdAt: serverTimestamp(),
+  });
+  await setDoc(doc(luis, 'bars', barRef.id, 'photos', 'de-luis'), photo('luis'));
+  await setDoc(doc(ana, 'bars', barRef.id, 'photos', 'de-ana'), photo('ana'));
+  await assertFails(deleteDoc(doc(luis, 'bars', barRef.id, 'photos', 'de-ana')));
+  await assertSucceeds(deleteDoc(doc(luis, 'bars', barRef.id, 'photos', 'de-luis')));
+  await setDoc(doc(luis, 'bars', barRef.id, 'photos', 'otra-de-luis'), photo('luis'));
+
+  // El bar: Luis no puede borrarlo; Ana sí, con todo lo de dentro (también lo de Luis).
+  await assertFails(deleteDoc(luisBar));
+  const children = [
+    ...(await getDocs(collection(ana, 'bars', barRef.id, 'reports'))).docs,
+    ...(await getDocs(collection(ana, 'bars', barRef.id, 'photos'))).docs,
+  ];
+  const batch = writeBatch(ana);
+  batch.delete(doc(ana, 'bars', barRef.id));
+  children.forEach((d) => batch.delete(d.ref));
+  await assertSucceeds(batch.commit());
 });

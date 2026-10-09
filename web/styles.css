@@ -167,6 +167,28 @@ body { display: flex; flex-direction: column; }
 .section { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
 .section h3 { margin: 0 0 8px; font-size: 1rem; }
 
+/* Borrar */
+.btn.danger { color: #b91c1c; border-color: #fecaca; }
+.btn.danger.armed { background: #b91c1c; color: #fff; border-color: #b91c1c; }
+.history li { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.history li > div { min-width: 0; }
+.history li .btn { flex-shrink: 0; }
+.photo-gallery figure .btn { margin-top: 4px; width: 100%; }
+[data-owner] .btn { width: 100%; }
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 3000;
+  max-width: calc(100% - 32px);
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: var(--text);
+  color: #fff;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.3);
+}
+
 /* Ficha del bar */
 .directions { display: block; margin-top: 12px; text-align: center; text-decoration: none; font-weight: 600; }
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }

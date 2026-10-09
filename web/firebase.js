@@ -5,7 +5,7 @@ import {
 } from 'firebase/auth';
 import {
   getFirestore, connectFirestoreEmulator, collection, doc, getDoc, getDocs, onSnapshot,
-  query, where, orderBy, limit, writeBatch, runTransaction, serverTimestamp,
+  query, where, orderBy, limit, writeBatch, runTransaction, serverTimestamp, deleteDoc,
 } from 'firebase/firestore';
 import { firebaseConfig } from './firebase-config.js';
 
@@ -294,5 +294,66 @@ export async function addReport(user, barId, { photos = [], ...report }) {
     for (const photo of photos) tx.set(doc(collection(barRef, 'photos')), photoDoc(user, photo));
   }));
 }
+
+// ---------- Borrar ----------
+
+// Borra un bar propio con todos sus precios y fotos. Firestore no borra solas
+// las subcolecciones, así que se borran a la vez (en tandas de 450 si hay muchas).
+export async function deleteBar(barId) {
+  const barRef = doc(db, 'bars', barId);
+  const [reports, photos] = await friendly(Promise.all([
+    getDocs(collection(barRef, 'reports')),
+    getDocs(collection(barRef, 'photos')),
+  ]));
+  const children = [...reports.docs, ...photos.docs].map((d) => d.ref);
+  let batch = writeBatch(db);
+  batch.delete(barRef);
+  let count = 1;
+  for (const ref of children) {
+    if (count === 450) {
+      await friendly(batch.commit());
+      batch = writeBatch(db);
+      count = 0;
+    }
+    batch.delete(ref);
+    count += 1;
+  }
+  await friendly(batch.commit());
+}
+
+// Borra un precio propio y recalcula el resumen del bar. Si era el último
+// precio, el bar pasa a mostrar el anterior.
+export async function deleteReport(barId, reportId) {
+  const barRef = doc(db, 'bars', barId);
+  const reportRef = doc(barRef, 'reports', reportId);
+  const latestTwo = await friendly(getDocs(query(collection(barRef, 'reports'), orderBy('createdAt', 'desc'), limit(2))));
+  const previous = latestTwo.docs.find((d) => d.id !== reportId);
+  await friendly(runTransaction(db, async (tx) => {
+    const bar = (await tx.get(barRef)).data();
+    const report = (await tx.get(reportRef)).data();
+    if (!bar || !report) throw userError('Ese precio ya no existe');
+    if (bar.reportCount <= 1) throw userError('No se puede borrar el único precio del bar');
+    const changes = {
+      reportCount: bar.reportCount - 1,
+      priceSum: bar.priceSum - report.price,
+      lastDeletedReportId: reportId,
+    };
+    if (bar.lastReportId === reportId) {
+      if (!previous) throw userError('No se puede borrar el único precio del bar');
+      const p = previous.data();
+      Object.assign(changes, {
+        price: p.price,
+        hasTapa: p.hasTapa,
+        tapaType: p.tapaType,
+        priceUpdatedAt: p.createdAt,
+        lastReportId: previous.id,
+      });
+    }
+    tx.delete(reportRef);
+    tx.update(barRef, changes);
+  }));
+}
+
+export const deletePhoto = (barId, photoId) => friendly(deleteDoc(doc(db, 'bars', barId, 'photos', photoId)));
 
 export { db, auth };
