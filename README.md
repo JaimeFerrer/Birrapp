@@ -1,100 +1,102 @@
-# 🍺 Birrapp
+# Birrapp
 
 Mapa colaborativo de bares: cada usuario puede añadir bares en el mapa con el
 precio de la cerveza y si ponen tapa (y de qué tipo). Cualquier usuario que
 pruebe el bar puede actualizar el precio y la tapa.
 
-## Arrancar
+## Cómo está hecha
 
-Requiere Node.js 20 o superior.
+- **Firebase** (plan gratuito *Spark*, sin tarjeta):
+  - **Authentication**: cuentas con correo y contraseña, y los correos de
+    recuperar la contraseña y de cambiar el correo.
+  - **Firestore**: base de datos de usuarios, bares y precios. La seguridad
+    está en [`firestore.rules`](firestore.rules).
+  - **Hosting**: aloja la web. Siempre está encendido, así que la app abre al
+    instante.
+- **Vite** para empaquetar la web (`web/`) en `dist/`.
+- **Leaflet + OpenStreetMap** para el mapa (sin API key).
+- Instalable como app en el móvil y en el ordenador (`web/public/manifest.webmanifest`).
+
+## Puesta en marcha
+
+### 1. Crear el proyecto de Firebase
+
+1. Entra en https://console.firebase.google.com y crea un proyecto (por
+   ejemplo `birrapp`). Google Analytics no hace falta.
+2. **Authentication** → *Comenzar* → *Sign-in method* → activa
+   **Correo electrónico/contraseña**.
+3. **Firestore Database** → *Crear base de datos* → ubicación en Europa (por
+   ejemplo `europe-southwest1`, Madrid) → **modo de producción**.
+4. ⚙️ *Configuración del proyecto* → *Tus apps* → icono web `</>` → registra
+   la app (sin marcar Hosting) y copia los datos de `firebaseConfig` en
+   [`web/firebase-config.js`](web/firebase-config.js).
+
+### 2. Probar en local
 
 ```bash
 npm install
-npm start          # http://localhost:3000
-npm test
+npm run dev          # http://localhost:5173 con el proyecto de Firebase real
 ```
 
-Variables de entorno opcionales: `PORT` (por defecto `3000`) y `DB_FILE`
-(por defecto `data/birrapp.db`). Con `TURSO_DATABASE_URL` y
-`TURSO_AUTH_TOKEN` usa una base de datos de [Turso](https://turso.tech) en
-lugar del fichero local.
+O sin tocar el proyecto real, con los emuladores de Firebase (necesita Java):
 
-## Publicarla en internet (gratis)
+```bash
+npm run emulators    # en una terminal
+npm run dev:local    # en otra
+```
 
-La app se despliega en [Render](https://render.com) y guarda los datos en
-[Turso](https://turso.tech), los dos con plan gratuito.
+### 3. Publicar
 
-1. **Base de datos (Turso)**
-   1. Crea una cuenta en https://app.turso.tech (puedes entrar con GitHub).
-   2. Crea una base de datos (por ejemplo `birrapp`), en la región más
-      cercana (p. ej. Europa).
-   3. Copia su **URL** (empieza por `libsql://`) y genera un **token**
-      (*Create Token* / *Generate Token*). Las tablas se crean solas al
-      arrancar la app.
-2. **Servidor (Render)**
-   1. Crea una cuenta en https://render.com con tu GitHub.
-   2. *New* → *Blueprint* y elige este repositorio (y la rama donde esté
-      `render.yaml`). Render detecta la configuración.
-   3. Te pedirá `TURSO_DATABASE_URL` y `TURSO_AUTH_TOKEN`: pega los valores
-      del paso 1 y pulsa *Apply*.
-   4. Cuando termine, la app estará en `https://birrapp-xxxx.onrender.com`.
+```bash
+npx firebase login
+npx firebase use --add      # elige el proyecto y ponle el alias "default"
+npm run deploy              # compila y sube la web y las reglas de seguridad
+```
 
-### Correos para recuperar la contraseña (Brevo)
+La app queda en `https://<id-del-proyecto>.web.app`. Cada vez que cambie algo,
+basta con volver a ejecutar `npm run deploy`.
 
-Para que la app pueda enviar el enlace de «¿Has olvidado tu contraseña?» se
-usa [Brevo](https://www.brevo.com) (gratis hasta 300 correos al día):
+## Importar los datos de la versión anterior
 
-1. Crea una cuenta en https://www.brevo.com.
-2. En *Senders, Domains & Dedicated IPs* → *Senders*, añade y verifica el
-   correo desde el que se enviarán los mensajes (te llega un código a ese
-   correo).
-3. En *SMTP & API* → *API Keys*, genera una clave.
-4. En Render, servicio `birrapp` → *Environment*, añade:
-   - `BREVO_API_KEY`: la clave del paso 3.
-   - `MAIL_FROM`: el correo verificado en el paso 2.
+La primera versión de Birrapp estaba en Render con una base de datos en Turso.
+Para pasar sus bares y precios:
 
-Sin estas variables la app funciona igual, pero el correo no se envía (solo
-se escribe en los logs del servidor).
+1. Publica la versión nueva y crea tu cuenta con el correo del dueño de la app
+   (el que está, cifrado, en `isImporter()` de `firestore.rules`).
+2. Abre `https://<id-del-proyecto>.web.app/importar.html` y pulsa **Importar**.
+   Si el servidor antiguo está dormido, la página espera a que despierte.
+3. Los bares que creaste tú pasan a tu cuenta; los de los demás conservan su
+   nombre en el historial. Si se repite, lo ya importado se salta.
 
-En el plan gratuito de Render el servidor se duerme tras 15 minutos sin
-visitas: la primera visita después tarda unos 50 segundos en cargar. Los
-datos no se pierden porque están en Turso. Cada vez que subas cambios a la
-rama, Render vuelve a desplegar automáticamente.
+La regla de importación caduca sola el 1 de noviembre de 2026. Después de
+importar se puede borrar el servicio de Render y la base de datos de Turso.
 
-## Cómo funciona
+## Tests
 
-- **Usuarios**: registro e inicio de sesión con correo y contraseña
-  (contraseñas con `scrypt`, sesión por token). Al registrarse se elige
-  también el nombre que verán los demás. Si se olvida la contraseña, llega un
-  enlace por correo que caduca en 1 hora. Las cuentas creadas antes de pedir
-  correo pueden entrar con su nombre de usuario y añadir el correo en
-  «Mi cuenta».
-- **Logo e iconos**: en `public/icons/` (barra superior, favicon e iconos
-  para instalarla como app). `public/manifest.webmanifest` y `public/sw.js`
-  permiten instalar Birrapp en el móvil («Añadir a pantalla de inicio») y en
-  el ordenador (icono de instalar en la barra de direcciones de Chrome/Edge).
-- **Mapa**: Leaflet + OpenStreetMap. Cada bar aparece con su precio actual;
-  en verde si ponen tapa.
-- **Añadir bar**: botón «Añadir bar» de abajo, tocas el mapa (o usas tu ubicación),
-  y rellenas nombre, dirección, precio y tapa.
-- **Actualizar precio**: al abrir un bar, cualquier usuario registrado puede
-  dejar un nuevo precio/tapa. El bar muestra el último precio, la media y el
-  historial de quién lo actualizó.
+```bash
+npm test     # reglas de seguridad de Firestore contra el emulador (necesita Java)
+```
 
-## API
+## Estructura
 
-| Método | Ruta | Auth | Descripción |
-| --- | --- | --- | --- |
-| POST | `/api/auth/register` | | `{ email, username, password }` → `{ token, user }` |
-| POST | `/api/auth/login` | | `{ email, password }` → `{ token, user }` |
-| POST | `/api/auth/forgot` | | `{ email }` envía el enlace para cambiar la contraseña |
-| POST | `/api/auth/reset` | | `{ token, password }` → `{ token, user }` |
-| POST | `/api/auth/logout` | ✔ | Cierra la sesión |
-| GET | `/api/auth/me` | ✔ | Usuario actual |
-| PATCH | `/api/auth/me` | ✔ | `{ email }` cambia el correo |
-| GET | `/api/bars` | | Lista de bares con último precio, media y tapa |
-| GET | `/api/bars/:id` | | Detalle del bar e historial de precios |
-| POST | `/api/bars` | ✔ | `{ name, address?, lat, lng, price, has_tapa, tapa_type? }` |
-| POST | `/api/bars/:id/reports` | ✔ | `{ price, has_tapa, tapa_type? }` actualiza precio/tapa |
+- `web/index.html`, `web/main.js`, `web/styles.css`: la app.
+- `web/firebase.js`: conexión con Firebase y operaciones (cuentas, bares, precios).
+- `web/firebase-config.js`: datos del proyecto de Firebase.
+- `web/importar.html`, `web/importar.js`: importación única de la versión anterior.
+- `web/public/`: logo, iconos, manifest y service worker.
+- `firestore.rules`, `firebase.json`: reglas de seguridad y configuración de Firebase.
 
-Autenticación: cabecera `Authorization: Bearer <token>`.
+### Modelo de datos (Firestore)
+
+- `users/{uid}`: `{ username, createdAt }`. El correo solo lo guarda Authentication.
+- `usernames/{nombre en minúsculas}`: `{ uid }`, para que no haya nombres repetidos.
+- `bars/{id}`: datos del bar y resumen del último precio (`price`, `hasTapa`,
+  `tapaType`, `reportCount`, `priceSum`, `lastReportId`…), para pintar el mapa
+  con una sola lectura.
+- `bars/{id}/reports/{id}`: cada precio que deja un usuario.
+
+## Versión anterior (temporal)
+
+Mientras se hace la importación, el servidor antiguo sigue en `src/`,
+`public/` y `render.yaml` (Render lo despliega con `npm start`). Sus tests se
+lanzan con `npm run test:legacy`. Se borrará cuando la importación esté hecha.

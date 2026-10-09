@@ -1,0 +1,145 @@
+rules_version = '2';
+
+// Reglas de seguridad de Birrapp.
+// - Cualquiera puede ver los bares, sus precios y los nombres de usuario.
+// - Solo los usuarios con sesión pueden añadir bares y precios, siempre a su
+//   nombre, y nadie puede editar ni borrar lo que ya está guardado.
+// - El resumen de cada bar (último precio, nº de opiniones, suma de precios)
+//   solo puede cambiar junto con un precio nuevo que cuadre con él.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function usernameOf(userId) {
+      return get(/databases/$(database)/documents/users/$(userId)).data.username;
+    }
+
+    function validPrice(price) {
+      return price is number && price > 0 && price <= 100;
+    }
+
+    function validTapa(d) {
+      return d.hasTapa is bool
+        && (d.hasTapa
+          ? (d.tapaType == null || (d.tapaType is string && d.tapaType.size() <= 100))
+          : d.tapaType == null);
+    }
+
+    // El precio guardado en el bar coincide con el del reporte que lo acompaña.
+    function matchesReport(bar, report) {
+      return report.price == bar.price
+        && report.hasTapa == bar.hasTapa
+        && report.tapaType == bar.tapaType;
+    }
+
+    // Importación única de los datos de la versión anterior (Render + Turso).
+    // Solo la cuenta del dueño de la app, y solo hasta el 1 de noviembre de 2026.
+    // Se puede borrar después de importar.
+    function isImporter() {
+      return signedIn()
+        && request.time < timestamp.date(2026, 11, 1)
+        && hashing.sha256(request.auth.token.email).toHexString().lower()
+          == '63f61c0a3d33fc453a402b2da0db5d7766643f5b57c226b31b160c66c6849239';
+    }
+
+    match /users/{userId} {
+      allow read: if true;
+      allow create: if signedIn() && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['username', 'createdAt'])
+        && request.resource.data.username is string
+        && request.resource.data.username.matches('^[A-Za-z0-9_.-]{3,30}$')
+        && request.resource.data.createdAt == request.time
+        && getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username.lower())).data.uid == userId;
+      allow update, delete: if false;
+    }
+
+    // Reserva de nombres para que no haya dos usuarios con el mismo.
+    match /usernames/{name} {
+      allow read: if true;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid'])
+        && request.resource.data.uid == request.auth.uid
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.username.lower() == name;
+      allow update, delete: if false;
+    }
+
+    match /bars/{barId} {
+      allow read: if true;
+      allow create: if (signedIn() && validNewBar()) || (isImporter() && validImportedBar());
+      allow update: if signedIn() && validBarUpdate();
+      allow delete: if false;
+
+      function validNewBar() {
+        let d = request.resource.data;
+        let report = getAfter(/databases/$(database)/documents/bars/$(barId)/reports/$(d.lastReportId)).data;
+        return d.keys().hasOnly(['name', 'address', 'lat', 'lng', 'createdBy', 'createdByName', 'createdAt',
+            'price', 'hasTapa', 'tapaType', 'priceUpdatedAt', 'reportCount', 'priceSum', 'lastReportId'])
+          && d.name is string && d.name.size() > 0 && d.name.size() <= 100
+          && (d.address == null || (d.address is string && d.address.size() <= 200))
+          && d.lat is number && d.lat >= -90 && d.lat <= 90
+          && d.lng is number && d.lng >= -180 && d.lng <= 180
+          && d.createdBy == request.auth.uid
+          && d.createdByName == usernameOf(request.auth.uid)
+          && d.createdAt == request.time
+          && d.priceUpdatedAt == request.time
+          && d.reportCount == 1
+          && d.priceSum == d.price
+          && report.userId == request.auth.uid
+          && matchesReport(d, report);
+      }
+
+      function validBarUpdate() {
+        let d = request.resource.data;
+        let old = resource.data;
+        let report = getAfter(/databases/$(database)/documents/bars/$(barId)/reports/$(d.lastReportId)).data;
+        return d.diff(old).affectedKeys()
+            .hasOnly(['price', 'hasTapa', 'tapaType', 'priceUpdatedAt', 'reportCount', 'priceSum', 'lastReportId'])
+          && d.lastReportId != old.lastReportId
+          && !exists(/databases/$(database)/documents/bars/$(barId)/reports/$(d.lastReportId))
+          && d.reportCount == old.reportCount + 1
+          && d.priceSum == old.priceSum + d.price
+          && d.priceUpdatedAt == request.time
+          && report.userId == request.auth.uid
+          && matchesReport(d, report);
+      }
+
+      function validImportedBar() {
+        let d = request.resource.data;
+        return barId.matches('legacy-[0-9]+')
+          && d.imported == true
+          && d.name is string && d.name.size() > 0
+          && d.lat is number && d.lng is number
+          && validPrice(d.price) && validTapa(d)
+          && d.reportCount is int && d.priceSum is number;
+      }
+
+      match /reports/{reportId} {
+        allow read: if true;
+        allow create: if (signedIn() && validNewReport()) || (isImporter() && validImportedReport());
+        allow update, delete: if false;
+
+        function validNewReport() {
+          let d = request.resource.data;
+          return d.keys().hasOnly(['userId', 'username', 'price', 'hasTapa', 'tapaType', 'createdAt'])
+            && d.userId == request.auth.uid
+            && d.username == usernameOf(request.auth.uid)
+            && validPrice(d.price)
+            && validTapa(d)
+            && d.createdAt == request.time
+            && getAfter(/databases/$(database)/documents/bars/$(barId)).data.lastReportId == reportId;
+        }
+
+        function validImportedReport() {
+          let d = request.resource.data;
+          return reportId.matches('legacy-[0-9]+')
+            && d.imported == true
+            && validPrice(d.price) && validTapa(d)
+            && d.username is string;
+        }
+      }
+    }
+  }
+}

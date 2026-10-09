@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#fbb703">
+  <title>Birrapp</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" href="/icons/favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Birrapp">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/"><img src="/icons/logo.png" alt="Birrapp" class="brand-logo"></a>
+    <button id="account-btn" class="btn">Entrar</button>
+  </header>
+
+  <main id="map"></main>
+
+  <button id="add-bar-btn" class="fab" hidden>Añadir bar</button>
+
+  <div id="placing-hint" class="hint" hidden>
+    <span>Toca el mapa donde está el bar</span>
+    <div class="hint-actions">
+      <button id="locate-btn" class="btn small">Usar mi ubicación</button>
+      <button id="cancel-place-btn" class="btn small">Cancelar</button>
+    </div>
+  </div>
+
+  <aside id="panel" class="panel" hidden>
+    <button id="panel-close" class="panel-close" aria-label="Cerrar">×</button>
+    <div id="panel-body"></div>
+  </aside>
+
+  <template id="report-fields-template">
+    <label>Precio de la cerveza (€)
+      <input name="price" type="number" inputmode="decimal" step="0.05" min="0.05" max="100" required>
+    </label>
+    <fieldset class="tapa">
+      <legend>¿Ponen tapa?</legend>
+      <label class="inline"><input type="radio" name="has_tapa" value="yes" required> Sí</label>
+      <label class="inline"><input type="radio" name="has_tapa" value="no"> No</label>
+    </fieldset>
+    <label data-tapa-type hidden>Tipo de tapa
+      <input name="tapa_type" maxlength="100" placeholder="Aceitunas, patatas bravas, montadito…">
+    </label>
+  </template>
+
+  <script type="module" src="/main.js"></script>
+</body>
+</html>
