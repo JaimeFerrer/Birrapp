@@ -47,6 +47,19 @@ npm run dev:local    # en otra
 
 ### 3. Publicar
 
+**Desde la web (sin terminal), con Vercel o Netlify:**
+
+1. Reglas de seguridad: consola de Firebase → **Firestore Database** →
+   pestaña **Reglas** → borra lo que haya, pega el contenido de
+   [`firestore.rules`](firestore.rules) y pulsa **Publicar**. Repetir cada vez
+   que cambie ese archivo.
+2. Web: en https://vercel.com (o https://app.netlify.com) → *Add New… →
+   Project* → importa este repositorio de GitHub. La configuración ya está en
+   `vercel.json` / `netlify.toml`; no hay que tocar nada. Cada vez que se suben
+   cambios a la rama, se vuelve a publicar sola.
+
+**O desde la terminal, con Firebase Hosting:**
+
 ```bash
 npx firebase login
 npm run deploy              # compila y sube la web y las reglas de seguridad
