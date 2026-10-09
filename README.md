@@ -69,8 +69,10 @@ rama, Render vuelve a desplegar automáticamente.
   enlace por correo que caduca en 1 hora. Las cuentas creadas antes de pedir
   correo pueden entrar con su nombre de usuario y añadir el correo en
   «Mi cuenta».
-- **Logo**: en `public/index.html`, sustituir el texto del enlace `.brand`
-  por `<img src="logo.svg" alt="Birrapp" class="brand-logo">`.
+- **Logo e iconos**: en `public/icons/` (barra superior, favicon e iconos
+  para instalarla como app). `public/manifest.webmanifest` y `public/sw.js`
+  permiten instalar Birrapp en el móvil («Añadir a pantalla de inicio») y en
+  el ordenador (icono de instalar en la barra de direcciones de Chrome/Edge).
 - **Mapa**: Leaflet + OpenStreetMap. Cada bar aparece con su precio actual;
   en verde si ponen tapa.
 - **Añadir bar**: botón «Añadir bar» de abajo, tocas el mapa (o usas tu ubicación),

@@ -409,6 +409,11 @@ async function showBar(id) {
 
 // ---------- Arranque ----------
 
+// Permite instalar Birrapp como app en el móvil y en el ordenador.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
 (async function init() {
   // Enlace del correo para cambiar la contraseña: /?reset=<token>
   const resetToken = new URLSearchParams(location.search).get('reset');
