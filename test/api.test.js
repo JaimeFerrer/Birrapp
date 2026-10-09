@@ -130,6 +130,11 @@ test('añadir bar y actualizar precio', async () => {
   const detail = await call(`/bars/${bar.id}`);
   assert.deepEqual(detail.body.reports.map((r) => r.username), ['luis', 'ana']);
 
+  const mine = await call('/auth/me/bars', { token: ana });
+  assert.deepEqual(mine.body.bars.map((b) => b.name), ['Bar Manolo']);
+  assert.equal((await call('/auth/me/bars', { token: luis })).body.bars.length, 0);
+  assert.equal((await call('/auth/me/bars')).status, 401);
+
   const list = await call('/bars');
   assert.equal(list.body.bars.length, 1);
   assert.equal(list.body.bars[0].price, 3);

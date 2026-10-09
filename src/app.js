@@ -134,6 +134,12 @@ function createApp(db, { sendMail = createMailer(), appUrl = process.env.APP_URL
     res.json({ user: publicUser(req.user) });
   });
 
+  // Bares que ha añadido el usuario, para el resumen de «Mi cuenta».
+  app.get('/api/auth/me/bars', requireAuth, wrap(async (req, res) => {
+    const rows = await db.all(`${BAR_SUMMARY_SQL} WHERE b.created_by = ? ORDER BY b.id DESC`, [req.user.id]);
+    res.json({ bars: rows.map(formatBar) });
+  }));
+
   // Cambiar el correo (o añadirlo en cuentas antiguas que no lo tenían).
   app.patch('/api/auth/me', requireAuth, wrap(async (req, res) => {
     const email = parseEmail(req.body.email);

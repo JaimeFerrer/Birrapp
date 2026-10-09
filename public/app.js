@@ -232,20 +232,47 @@ function showAccount() {
   const { user } = state;
   const node = fragment(`
     <h2>Mi cuenta</h2>
-    <p><strong>${escapeHtml(user.username)}</strong></p>
-    ${user.email ? '' : '<p class="error">Añade tu correo para poder recuperar la contraseña si la olvidas.</p>'}
-    <form class="form">
-      <label>Correo electrónico
-        <input name="email" type="email" autocomplete="email" inputmode="email" required value="${escapeHtml(user.email || '')}">
-      </label>
-      <p class="error"></p>
-      <button class="btn block">Guardar correo</button>
-    </form>
+    <p class="account-name">${escapeHtml(user.username)}</p>
+
+    <div class="section">
+      <h3>Correo electrónico</h3>
+      ${user.email ? `
+        <div class="account-row" data-email-view>
+          <span class="account-email">${escapeHtml(user.email)}</span>
+          <button class="btn small" data-edit-email>Cambiar</button>
+        </div>` : '<p class="error">Añade tu correo para poder recuperar la contraseña si la olvidas.</p>'}
+      <form class="form" ${user.email ? 'hidden' : ''}>
+        <label>
+          <span class="sr-only">Correo electrónico</span>
+          <input name="email" type="email" autocomplete="email" inputmode="email" required value="${escapeHtml(user.email || '')}">
+        </label>
+        <p class="error"></p>
+        <button class="btn primary block">Guardar correo</button>
+        ${user.email ? '<button type="button" class="btn block" data-cancel-email>Cancelar</button>' : ''}
+      </form>
+    </div>
+
+    <div class="section">
+      <h3 data-bars-title>Tus bares</h3>
+      <div data-bars><p class="muted">Cargando…</p></div>
+    </div>
+
     <div class="section">
       <button class="btn block" data-logout>Cerrar sesión</button>
     </div>
   `);
+
   const form = $('form', node);
+  const emailView = $('[data-email-view]', node);
+  $('[data-edit-email]', node)?.addEventListener('click', () => {
+    emailView.hidden = true;
+    form.hidden = false;
+    $('input', form).focus();
+  });
+  $('[data-cancel-email]', node)?.addEventListener('click', () => {
+    form.hidden = true;
+    emailView.hidden = false;
+  });
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     submitting(form, async () => {
@@ -254,12 +281,39 @@ function showAccount() {
       showAccount();
     });
   });
+
   $('[data-logout]', node).addEventListener('click', async () => {
     await api('/auth/logout', { method: 'POST' }).catch(() => {});
     setUser(null, null);
     closePanel();
   });
+
+  const barsBox = $('[data-bars]', node);
+  const barsTitle = $('[data-bars-title]', node);
   openPanel(node);
+
+  api('/auth/me/bars').then(({ bars }) => {
+    barsTitle.textContent = `Tus bares (${bars.length})`;
+    if (!bars.length) {
+      barsBox.innerHTML = '<p class="muted">Todavía no has añadido ningún bar. Pulsa «Añadir bar» para poner el primero.</p>';
+      return;
+    }
+    barsBox.replaceChildren(fragment(`<ul class="my-bars">${bars.map((bar) => `
+      <li>
+        <button class="my-bar" data-bar="${bar.id}">
+          <span class="my-bar-name">${escapeHtml(bar.name)}</span>
+          <span class="my-bar-price">${euros(bar.price)}</span>
+          <span class="muted my-bar-tapa">${bar.has_tapa ? `Tapa: ${escapeHtml(bar.tapa_type || 'sí')}` : 'Sin tapa'}</span>
+        </button>
+      </li>`).join('')}</ul>`));
+    barsBox.querySelectorAll('[data-bar]').forEach((btn) => btn.addEventListener('click', () => {
+      const bar = bars.find((b) => b.id === Number(btn.dataset.bar));
+      map.setView([bar.lat, bar.lng], 17);
+      showBar(bar.id);
+    }));
+  }).catch((err) => {
+    barsBox.innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`;
+  });
 }
 
 $('#account-btn').addEventListener('click', () => (state.user ? showAccount() : showAuth('login')));
