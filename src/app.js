@@ -34,38 +34,47 @@ function parseReport(body) {
   return { price: Math.round(price * 100) / 100, hasTapa: body.has_tapa, tapaType: tapaType || null };
 }
 
+// Express 4 no captura errores de handlers async por sí solo.
+const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
 function createApp(db) {
   const app = express();
   app.use(express.json());
   app.use(express.static(path.join(__dirname, '..', 'public')));
   app.use('/vendor/leaflet', express.static(path.dirname(require.resolve('leaflet/dist/leaflet.js'))));
 
-  const findSession = db.prepare(
-    'SELECT u.id, u.username FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?'
-  );
-
-  app.use((req, _res, next) => {
+  app.use(wrap(async (req, _res, next) => {
     const header = req.get('authorization') || '';
     const token = header.startsWith('Bearer ') ? header.slice(7) : null;
     req.token = token;
-    req.user = token ? findSession.get(token) ?? null : null;
+    req.user = token
+      ? await db.get(
+        'SELECT u.id, u.username FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?',
+        [token]
+      )
+      : null;
     next();
-  });
+  }));
 
   function requireAuth(req, res, next) {
     if (!req.user) return res.status(401).json({ error: 'Tienes que iniciar sesión' });
     next();
   }
 
-  function startSession(userId) {
+  async function startSession(userId) {
     const token = newToken();
-    db.prepare('INSERT INTO sessions (token, user_id) VALUES (?, ?)').run(token, userId);
+    await db.run('INSERT INTO sessions (token, user_id) VALUES (?, ?)', [token, userId]);
     return token;
+  }
+
+  async function barSummary(id) {
+    const bar = await db.get(`${BAR_SUMMARY_SQL} WHERE b.id = ?`, [id]);
+    return bar && formatBar(bar);
   }
 
   // --- Usuarios ---
 
-  app.post('/api/auth/register', (req, res) => {
+  app.post('/api/auth/register', wrap(async (req, res) => {
     const username = String(req.body.username ?? '').trim();
     const password = String(req.body.password ?? '');
     if (!/^[\w.-]{3,30}$/.test(username)) {
@@ -74,30 +83,30 @@ function createApp(db) {
     if (password.length < 6) {
       return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
     }
-    if (db.prepare('SELECT 1 FROM users WHERE username = ?').get(username)) {
+    if (await db.get('SELECT 1 FROM users WHERE username = ?', [username])) {
       return res.status(409).json({ error: 'Ese usuario ya existe' });
     }
-    const { lastInsertRowid } = db
-      .prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)')
-      .run(username, hashPassword(password));
-    const id = Number(lastInsertRowid);
-    res.status(201).json({ token: startSession(id), user: { id, username } });
-  });
+    const { lastInsertRowid: id } = await db.run(
+      'INSERT INTO users (username, password_hash) VALUES (?, ?)',
+      [username, hashPassword(password)]
+    );
+    res.status(201).json({ token: await startSession(id), user: { id, username } });
+  }));
 
-  app.post('/api/auth/login', (req, res) => {
+  app.post('/api/auth/login', wrap(async (req, res) => {
     const username = String(req.body.username ?? '').trim();
     const password = String(req.body.password ?? '');
-    const user = db.prepare('SELECT id, username, password_hash FROM users WHERE username = ?').get(username);
+    const user = await db.get('SELECT id, username, password_hash FROM users WHERE username = ?', [username]);
     if (!user || !verifyPassword(password, user.password_hash)) {
       return res.status(401).json({ error: 'Usuario o contraseña incorrectos' });
     }
-    res.json({ token: startSession(user.id), user: { id: user.id, username: user.username } });
-  });
+    res.json({ token: await startSession(user.id), user: { id: user.id, username: user.username } });
+  }));
 
-  app.post('/api/auth/logout', requireAuth, (req, res) => {
-    db.prepare('DELETE FROM sessions WHERE token = ?').run(req.token);
+  app.post('/api/auth/logout', requireAuth, wrap(async (req, res) => {
+    await db.run('DELETE FROM sessions WHERE token = ?', [req.token]);
     res.status(204).end();
-  });
+  }));
 
   app.get('/api/auth/me', requireAuth, (req, res) => {
     res.json({ user: req.user });
@@ -105,26 +114,24 @@ function createApp(db) {
 
   // --- Bares ---
 
-  app.get('/api/bars', (_req, res) => {
-    const rows = db.prepare(`${BAR_SUMMARY_SQL} ORDER BY b.id`).all();
+  app.get('/api/bars', wrap(async (_req, res) => {
+    const rows = await db.all(`${BAR_SUMMARY_SQL} ORDER BY b.id`);
     res.json({ bars: rows.map(formatBar) });
-  });
+  }));
 
-  app.get('/api/bars/:id', (req, res) => {
-    const bar = db.prepare(`${BAR_SUMMARY_SQL} WHERE b.id = ?`).get(Number(req.params.id));
+  app.get('/api/bars/:id', wrap(async (req, res) => {
+    const bar = await barSummary(Number(req.params.id));
     if (!bar) return res.status(404).json({ error: 'Bar no encontrado' });
-    const reports = db
-      .prepare(
-        `SELECT r.id, r.price, r.has_tapa, r.tapa_type, r.created_at, u.username
-         FROM reports r JOIN users u ON u.id = r.user_id
-         WHERE r.bar_id = ? ORDER BY r.id DESC LIMIT 50`
-      )
-      .all(bar.id)
-      .map(formatBar);
-    res.json({ bar: formatBar(bar), reports });
-  });
+    const reports = await db.all(
+      `SELECT r.id, r.price, r.has_tapa, r.tapa_type, r.created_at, u.username
+       FROM reports r JOIN users u ON u.id = r.user_id
+       WHERE r.bar_id = ? ORDER BY r.id DESC LIMIT 50`,
+      [bar.id]
+    );
+    res.json({ bar, reports: reports.map(formatBar) });
+  }));
 
-  app.post('/api/bars', requireAuth, (req, res) => {
+  app.post('/api/bars', requireAuth, wrap(async (req, res) => {
     const name = String(req.body.name ?? '').trim();
     const address = String(req.body.address ?? '').trim() || null;
     const lat = Number(req.body.lat);
@@ -138,36 +145,29 @@ function createApp(db) {
     const report = parseReport(req.body);
     if (report.error) return res.status(400).json({ error: report.error });
 
-    db.exec('BEGIN');
-    try {
-      const barId = Number(
-        db.prepare('INSERT INTO bars (name, address, lat, lng, created_by) VALUES (?, ?, ?, ?, ?)')
-          .run(name, address, lat, lng, req.user.id).lastInsertRowid
-      );
-      db.prepare('INSERT INTO reports (bar_id, user_id, price, has_tapa, tapa_type) VALUES (?, ?, ?, ?, ?)')
-        .run(barId, req.user.id, report.price, report.hasTapa ? 1 : 0, report.tapaType);
-      db.exec('COMMIT');
-      const bar = db.prepare(`${BAR_SUMMARY_SQL} WHERE b.id = ?`).get(barId);
-      res.status(201).json({ bar: formatBar(bar) });
-    } catch (err) {
-      db.exec('ROLLBACK');
-      throw err;
-    }
-  });
+    const [{ lastInsertRowid: barId }] = await db.batch([
+      ['INSERT INTO bars (name, address, lat, lng, created_by) VALUES (?, ?, ?, ?, ?)',
+        [name, address, lat, lng, req.user.id]],
+      ['INSERT INTO reports (bar_id, user_id, price, has_tapa, tapa_type) VALUES (last_insert_rowid(), ?, ?, ?, ?)',
+        [req.user.id, report.price, report.hasTapa ? 1 : 0, report.tapaType]],
+    ]);
+    res.status(201).json({ bar: await barSummary(barId) });
+  }));
 
   // Un usuario que ha probado el bar actualiza el precio / la tapa.
-  app.post('/api/bars/:id/reports', requireAuth, (req, res) => {
+  app.post('/api/bars/:id/reports', requireAuth, wrap(async (req, res) => {
     const barId = Number(req.params.id);
-    if (!db.prepare('SELECT 1 FROM bars WHERE id = ?').get(barId)) {
+    if (!(await db.get('SELECT 1 FROM bars WHERE id = ?', [barId]))) {
       return res.status(404).json({ error: 'Bar no encontrado' });
     }
     const report = parseReport(req.body);
     if (report.error) return res.status(400).json({ error: report.error });
-    db.prepare('INSERT INTO reports (bar_id, user_id, price, has_tapa, tapa_type) VALUES (?, ?, ?, ?, ?)')
-      .run(barId, req.user.id, report.price, report.hasTapa ? 1 : 0, report.tapaType);
-    const bar = db.prepare(`${BAR_SUMMARY_SQL} WHERE b.id = ?`).get(barId);
-    res.status(201).json({ bar: formatBar(bar) });
-  });
+    await db.run(
+      'INSERT INTO reports (bar_id, user_id, price, has_tapa, tapa_type) VALUES (?, ?, ?, ?, ?)',
+      [barId, req.user.id, report.price, report.hasTapa ? 1 : 0, report.tapaType]
+    );
+    res.status(201).json({ bar: await barSummary(barId) });
+  }));
 
   app.use('/api', (_req, res) => res.status(404).json({ error: 'No encontrado' }));
 
