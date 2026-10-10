@@ -41,9 +41,9 @@ body { display: flex; flex-direction: column; }
 .brand { gap: 8px; }
 .brand-logo { height: 52px; width: auto; display: block; }
 .brand-name {
-  font-size: 1.6rem;
+  font-size: 1.25rem;
   font-weight: 900;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   line-height: 1;
 }
 
